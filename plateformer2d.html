@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Plateformer 2d
+    </title>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+
+        // Inputs
+        let upPressed, downPressed, leftPressed, rightPressed;
+        let keyboardEnum = { left: 37, up: 38, right: 39, down: 40 };
+
+        // Entities
+        let player = {
+            posX: width / 2,
+            posY: height / 2,
+            size: 16,
+            speedX: 4,
+            speedY: 0,
+            jumping: false
+        };
+
+        const jump = 12;
+        const gravity = 1;
+
+        function fillCircle(px, py, r) {
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function keyDownHandler(event) {
+            if (event.keyCode == keyboardEnum.right) {
+                rightPressed = true;
+            }
+            if (event.keyCode == keyboardEnum.left) {
+                leftPressed = true;
+            }
+            if (event.keyCode == keyboardEnum.down) {
+                downPressed = true;
+            }
+            if (event.keyCode == keyboardEnum.up) {
+                upPressed = true;
+            }
+        }
+
+        function keyUpHandler(event) {
+            if (event.keyCode == keyboardEnum.right) {
+                rightPressed = false;
+            }
+            if (event.keyCode == keyboardEnum.left) {
+                leftPressed = false;
+            }
+            if (event.keyCode == keyboardEnum.down) {
+                downPressed = false;
+            }
+            if (event.keyCode == keyboardEnum.up) {
+                upPressed = false;
+            }
+        }
+
+        function handleInputs(isCollision) {
+            if (rightPressed && !isCollision.r) {
+                player.posX += player.speedX;
+            } else if (leftPressed && !isCollision.l) {
+                player.posX -= player.speedX;
+            }
+
+            if (!isCollision.t && !isCollision.b) {
+                player.posY += player.speedY;
+            }
+
+            if (upPressed && !player.jumping) {
+                player.jumping = true;
+                player.speedY = -jump;
+            }
+
+            if (!isCollision.b) {
+                player.speedY += gravity;
+            } else {
+                player.posY = height - player.size;
+                player.jumping = false;
+            }
+        }
+
+        // character collision against the borders
+        function handlePlayerCollisions() {
+            isCollision = { l: false, r: false, t: false, b: false };
+
+            if (player.posX - player.size - player.speedX < 0) {
+                isCollision.l = true;
+            }
+
+            if (player.posX + player.size + player.speedX > width) {
+                isCollision.r = true;
+            }
+
+            if (player.posY - player.size - player.speedY < 0) {
+                isCollision.t = true;
+            }
+
+            if (player.posY + player.size + player.speedY > height) {
+                isCollision.b = true;
+            }
+
+            return isCollision;
+        }
+
+        function update() {
+            var isCollision = handlePlayerCollisions();
+            handleInputs(isCollision);
+        }
+
+        function draw() {
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, 256, 256);
+
+            ctx.fillStyle = "tomato";
+            fillCircle(player.posX, player.posY, player.size);
+        }
+
+        function frame() {
+            update();
+            draw();
+
+            requestAnimationFrame(frame);
+        }
+
+        upPressed = downPressed = leftPressed = rightPressed = false;
+        document.addEventListener("keydown", keyDownHandler, false);
+        document.addEventListener("keyup", keyUpHandler, false);
+        frame();
+
+    </script>
+</body>
+
+</html>

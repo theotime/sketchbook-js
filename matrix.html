@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Matrix
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="output">
+        <p></p>
+    </div>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        class Mat4x4 {
+
+            // column-major: computation & array declaration (OpenGL format)
+            // https://www.scratchapixel.com/lessons/mathematics-physics-for-computer-graphics/geometry/row-major-vs-column-major-vector
+            constructor(params = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) { // default = identity
+                // simple checks to catch basic mistakes
+                if (!Array.isArray(params)) {
+                    throw "Not an array";
+                } else if (params.some(isNaN)) {
+                    throw "Not a number.";
+                } else if (params.length != 16) {
+                    throw "Not the right amount of params.";
+                }
+
+                this.value = params;
+            }
+
+            array() {
+                return this.value;
+            }
+
+            // https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Matrix_math_for_the_web
+            // converted to column-major
+            multiplyVec4(v) {
+                let x = this.value[0] * v[0] + this.value[4] * v[1] + this.value[8] * v[2] + this.value[12] * v[3];
+                let y = this.value[1] * v[0] + this.value[5] * v[1] + this.value[9] * v[2] + this.value[13] * v[3];
+                let z = this.value[2] * v[0] + this.value[6] * v[1] + this.value[10] * v[2] + this.value[14] * v[3];
+                let w = this.value[3] * v[0] + this.value[7] * v[1] + this.value[11] * v[2] + this.value[15] * v[3];
+                return [x, y, z, w];
+            }
+
+            multiplyMat4x4(matrix) {
+
+                let m = matrix.array();
+
+                let column0 = [m[0], m[1], m[2], m[3]];
+                let column1 = [m[4], m[5], m[6], m[7]];
+                let column2 = [m[8], m[9], m[10], m[11]];
+                let column3 = [m[12], m[13], m[14], m[15]];
+
+                let result0 = this.multiplyVec4(column0);
+                let result1 = this.multiplyVec4(column1);
+                let result2 = this.multiplyVec4(column2);
+                let result3 = this.multiplyVec4(column3);
+
+                let result = new Mat4x4([
+                    result0[0], result0[1], result0[2], result0[3],
+                    result1[0], result1[1], result1[2], result1[3],
+                    result2[0], result2[1], result2[2], result2[3],
+                    result3[0], result3[1], result3[2], result3[3]
+                ]);
+                return result;
+            }
+
+            // http://www.songho.ca/opengl/gl_quaternion.html
+            //
+            // 1-2yy-2zz     2xy-2sz      2xz+2sy      0
+            // 2xy+2sz       1-2xx-2zz    2yz-2sx      0
+            // 2xz-2sy       2yz+2sx      1-2xx-2yy    0
+            // 0             0            0            1
+            fromQuaternion(x, y, z, w) {
+                this.value = [
+                    1 - 2 * y * y - 2 * z * z, 2 * x * y + 2 * w * z, 2 * x * z - 2 * w * y, 0, // column 1
+                    2 * x * y - 2 * w * z, 1 - 2 * x * x - 2 * z * z, 2 * y * z + 2 * w * x, 0, // column 2
+                    2 * x * z + 2 * w * y, 2 * y * z - 2 * w * x, 1 - 2 * x * x - 2 * y * y, 0, // column 3
+                    0, 0, 0, 1
+                ];
+            }
+
+            // 1 0 0 tx
+            // 0 1 0 ty
+            // 0 0 1 tz
+            // 0 0 0 1
+            fromTranslate(tx, ty, tz) {
+                this.value = [
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    tx, ty, tz, 1
+                ]; // column-major
+            }
+
+            // sx  0  0   0
+            // 0  sy  0   0
+            // 0  0   sz  0
+            // 0  0   0   1
+            fromScale(sx, sy, sz) {
+                this.value = [sx, 0, 0, 0, 0, sy, 0, 0, 0, 0, sz, 0, 0, 0, 0, 1];
+            }
+
+            toString(rounding = 2) {
+                let string = "";
+
+                // first row
+                string += this.value[0].toFixed(rounding) + " ";
+                string += this.value[4].toFixed(rounding) + " ";
+                string += this.value[8].toFixed(rounding) + " ";
+                string += this.value[12].toFixed(rounding) + "<br>";
+
+                // second row
+                string += this.value[1].toFixed(rounding) + " ";
+                string += this.value[5].toFixed(rounding) + " ";
+                string += this.value[9].toFixed(rounding) + " ";
+                string += this.value[13].toFixed(rounding) + "<br>";
+
+                // third row
+                string += this.value[2].toFixed(rounding) + " ";
+                string += this.value[6].toFixed(rounding) + " ";
+                string += this.value[10].toFixed(rounding) + " ";
+                string += this.value[14].toFixed(rounding) + "<br>";
+
+                // fourth row
+                string += this.value[3].toFixed(rounding) + " ";
+                string += this.value[7].toFixed(rounding) + " ";
+                string += this.value[11].toFixed(rounding) + " ";
+                string += this.value[15].toFixed(rounding) + "<br>";
+
+                return string;
+            }
+        }
+
+        function vectorToString(v, rounding = 2) {
+            let string = "";
+            string += v[0].toFixed(rounding) + ", ";
+            string += v[1].toFixed(rounding) + ", ";
+            string += v[2].toFixed(rounding) + ", ";
+            string += v[3].toFixed(rounding);
+            return string;
+        }
+
+
+        //let err = new Mat4x4("abcde");
+        //let err = new Mat4x4([1, 2, 3, 4, 5, "abcde", 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+        //let err = new Mat4x4([1, 2, 3, 4]);
+
+        let m1 = new Mat4x4();
+        let m2 = new Mat4x4([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+
+
+        let rx30 = new Mat4x4();
+        rx30.fromQuaternion(0.259, 0, 0, 0.966);
+
+        let rx45 = new Mat4x4();
+        rx45.fromQuaternion(0.3826834559440613, 0, 0, 0.9238795042037964);
+
+        let rx90 = new Mat4x4();
+        rx90.fromQuaternion(0.7071068286895752, 0, 0, 0.7071068286895752);
+
+        let tm1 = new Mat4x4();
+        tm1.fromTranslate(1, 2, 3);
+
+        let sm1 = new Mat4x4();
+        sm1.fromScale(4, 5, 6);
+
+        let v1 = [10, 20, 30, 1];
+        let trs = new Mat4x4();
+        trs.fromScale(2, 2, 2);
+        //trs.fromTranslate(2, 0, 0);
+        let vresult1 = trs.multiplyVec4(v1);
+
+
+        // vector multiplication
+        let v2 = [0, 1, 0, 1]; // y vector
+        let vresult2 = rx90.multiplyVec4(v2); // into z vector
+
+
+        // matrix multiplication
+        let mresult1 = rx45.multiplyMat4x4(rx45); // 90
+        mresult1 = mresult1.multiplyMat4x4(rx90); // 180
+        mresult1 = mresult1.multiplyMat4x4(mresult1); // 360 = identity
+
+        // https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_004_ScenesNodes.md
+        let t1 = new Mat4x4();
+        t1.fromTranslate(10, 20, 30);
+        let s1 = new Mat4x4();
+        s1.fromScale(2, 1, 0.5);
+        let mresult2 = rx30.multiplyMat4x4(s1); // r * s
+        mresult2 = t1.multiplyMat4x4(mresult2); // t * (r * s)
+
+        output("init");
+        output("----");
+        output();
+        output(m1.toString(0));
+        output(m2.toString(0));
+        output("quaternions");
+        output("-----------");
+        output();
+        output(rx30.toString());
+        output(rx45.toString());
+        output(rx90.toString(0));
+        output("trs");
+        output("---");
+        output();
+        output(tm1.toString(0));
+        output(sm1.toString(0));
+        output("vectors multiplication");
+        output("----------------------");
+        output();
+        output(vectorToString(vresult1, 0));
+        output(vectorToString(vresult2, 0));
+        output();
+        output("matrix multiplication");
+        output("---------------------");
+        output();
+        output(mresult1.toString(0));
+        output(mresult2.toString(3));
+
+
+    </script>
+</body>
+
+</html>

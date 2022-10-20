@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Draw lines
+    </title>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <br>
+    <input id="undo" type="button" value="undo">
+    <input id="redo" type="button" value="redo">
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+        var currentLine = null;
+        var pointerPosition;
+        var pictures = [];
+        var undo = [];
+
+        const close = true;
+
+        const equalPoints = (a, b) => a.x == b.x && a.y == b.y;
+
+        function drawLine(points) {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            points.slice(1).forEach(v => ctx.lineTo(v.x, v.y));
+            ctx.stroke();
+
+            //ctx.fillStyle = "black";
+            //ctx.fill();
+        }
+
+        function updateCanvas() {
+            ctx.clearRect(0, 0, width, height);
+
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+
+            pictures.forEach(v => drawLine(v));
+
+            if (currentLine !== null) {
+                drawLine(currentLine);
+            }
+        }
+
+
+        canvas.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+        });
+
+        canvas.addEventListener("pointerdown", (e) => {
+            currentLine = [];
+            currentLine.push({ ...pointerPosition });
+        });
+
+        canvas.addEventListener("pointerup", (e) => {
+            if (currentLine !== null) {
+                if (close) {
+                    currentLine.push(currentLine[0]);
+                }
+                pictures.push(currentLine);
+            }
+
+            currentLine = null;
+            updateCanvas();
+        });
+
+        canvas.addEventListener("pointermove", (e) => {
+            let r = canvas.getBoundingClientRect();
+            pointerPosition = { x: e.clientX - r.left, y: e.clientY - r.top };
+
+            if (currentLine !== null) {
+                let lastidx = currentLine.length - 1;
+                if (!equalPoints(currentLine[lastidx], pointerPosition)) {
+                    currentLine.push({ ...pointerPosition });
+                    updateCanvas();
+                }
+
+            }
+        });
+
+        $("#undo").addEventListener("click", e => {
+            let lastItem = pictures.pop();
+            if (lastItem !== undefined) {
+                undo.push(lastItem);
+            }
+
+            updateCanvas();
+        });
+
+        $("#redo").addEventListener("click", e => {
+            let lastUndo = undo.pop();
+            if (lastUndo !== undefined) {
+                pictures.push(lastUndo);
+            }
+
+            updateCanvas();
+        });
+
+        updateCanvas();
+
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        GLTF
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="output">
+        <p></p>
+    </div>
+    <script>
+        var gltf = {
+            "asset": {
+                "generator": "Khronos glTF Blender I/O v1.5.17",
+                "version": "2.0"
+            },
+            "scene": 0,
+            "scenes": [
+                {
+                    "name": "Scene",
+                    "nodes": [
+                        2,
+                        3,
+                        5
+                    ]
+                }
+            ],
+            "nodes": [
+                {
+                    "name": "Empty.002",
+                    "translation": [
+                        1,
+                        0,
+                        0
+                    ]
+                },
+                {
+                    "children": [
+                        0
+                    ],
+                    "name": "Empty.001",
+                    "translation": [
+                        0,
+                        1,
+                        0
+                    ]
+                },
+                {
+                    "children": [
+                        1
+                    ],
+                    "name": "Empty",
+                    "translation": [
+                        1,
+                        0,
+                        0
+                    ]
+                },
+                {
+                    "name": "Empty.003"
+                },
+                {
+                    "name": "Empty.005"
+                },
+                {
+                    "children": [
+                        4
+                    ],
+                    "name": "Empty.004",
+                    "translation": [
+                        -1,
+                        0,
+                        0
+                    ]
+                }
+            ]
+        };
+    </script>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        // https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_002_BasicGltfStructure.md
+
+        // constants
+        const GLfloat = 5126;
+        const GLushort = 5123;
+        const bufferTypeComponent = { 5123: Uint16Array, 5126: Float32Array };
+        const sizeofType = { SCALAR: 1, VEC2: 2, VEC3: 3 };
+
+        function printNumbers(buf, offs, size, cnt, format) {
+            let view = new format(buf, offs, size * cnt);
+            let dump = "";
+            let count = 0;
+            view.forEach(e => {
+                if (count % cnt == 0)
+                    dump += "<br>";
+                dump += e.toString() + " ";
+                count++;
+            });
+            output(dump);
+        }
+
+        async function printBuffer(gltf, accessorId) {
+            const bufferViewId = gltf.accessors[accessorId].bufferView;
+            const uri = gltf.buffers[gltf.bufferViews[bufferViewId].buffer].uri;
+
+            let res = await fetch(uri);
+            let data = await res.blob();
+            let reader = new FileReader();
+            reader.readAsArrayBuffer(data);
+
+            reader.onload = function () {
+                let buf = reader.result;
+
+                printNumbers(
+                    buf,
+                    gltf.bufferViews[bufferViewId].byteOffset,
+                    gltf.accessors[accessorId].count,
+                    sizeofType[gltf.accessors[accessorId].type],
+                    bufferTypeComponent[gltf.accessors[accessorId].componentType]
+                );
+            }
+        }
+
+        function buildTrsMatrix(node) {
+            let trs = ["trs_identity"];
+            if (node.translation) {
+                trs.push(node.translation);
+            }
+            if (node.rotation) {
+                trs.push(node.rotation);
+            }
+            if (node.scale) {
+                trs.push(node.scale);
+            }
+
+            return trs;
+        }
+
+        function printScenegraph(gltf, nodeId, prefix = "", modelMat = ["identity"]) {
+
+            let trsMat = buildTrsMatrix(gltf.nodes[nodeId]);
+            modelMat.push(trsMat);
+
+            output(prefix + " " + gltf.nodes[nodeId].name + " :: modelMat = " + modelMat);
+            if (gltf.nodes[nodeId].children) {
+                gltf.nodes[nodeId].children.forEach(child => printScenegraph(gltf, child, prefix + "+", modelMat));
+            }
+        }
+
+        function printMesh(gltf, nodeId) {
+
+            const node = gltf.nodes[nodeId];
+            output(node.name);
+
+            if (node.mesh != null) {
+                const mesh = gltf.meshes[node.mesh];
+                output(mesh.name);
+                mesh.primitives.forEach(async primitive => {
+                    await printBuffer(gltf, primitive.attributes.POSITION);
+                    await printBuffer(gltf, primitive.attributes.NORMAL);
+                    await printBuffer(gltf, primitive.attributes.TEXCOORD_0);
+                    await printBuffer(gltf, primitive.indices);
+                });
+            } else {
+                output("no mesh.");
+            }
+
+            if (node.children) {
+                node.children.forEach(child => printMesh(gltf, child));
+            }
+        }
+
+        //fetch("assets/cube.gltf").then(response => response.json()).then(gltf => {
+        output("scenegraph");
+        output("----------");
+        output();
+        gltf.scenes.forEach(scene => {
+            scene.nodes.forEach(node => {
+                printScenegraph(gltf, node);
+            });
+        });
+
+        output();
+        output("meshes");
+        output("------");
+        output();
+        gltf.scenes.forEach(scene => {
+            scene.nodes.forEach(node => {
+                printMesh(gltf, node);
+            });
+        });
+        //}).catch(e => console.log(e));
+
+    </script>
+</body>
+
+</html>

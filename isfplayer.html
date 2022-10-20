@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        ISF Shader Player
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <input type="file" id="input-file" multiple />
+    <br><br>
+    <canvas id="canvas"></canvas>
+    <br>
+    <input id="play" type="button" value="play / pause">
+    <input id="next" type="button" value="next">
+    <span>Frames: <span id="frames">0</span></span>
+    <div>
+        <ul id="file-queue"></ul>
+    </div>
+    <div id="output">
+        <p></p>
+    </div>
+    <script id="shader-vs" type="x-shader/x-vertex">
+        precision mediump float;
+        attribute vec3 aVertexPosition;
+    
+        void main(void) {
+        gl_Position = vec4(aVertexPosition, 1.0);
+        }
+    </script>
+    <script id="default" type="x-shader/x-fragment">
+        /*{}*/
+        void main(void) {
+            gl_FragColor = vec4(0.0);
+        }
+    </script>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        var canvas = $("#canvas");
+        var gl = canvas.getContext("webgl", {
+            alpha: false
+        });
+
+        let width = 256, height = 256;
+        let pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+
+
+        // Parameters
+        var timePerProgram = 12.0; // seconds
+        var fps = 60.0;
+
+        // Globals
+        //var startGlobalTime;
+        var frames;
+        var vertexPositionAttribute;
+        var buffer;
+        var currentProgramIdx;
+        var paused = false;
+
+        var defaultProgram = null;
+        /* [{
+            name: "shadername",
+            src: "shader content",
+            program: null
+        }]*/
+        var playlist = [];
+
+
+        function formatFloat(num) {
+            let formattedNum;
+            if (Number.isInteger(num)) {
+                formattedNum = num + ".0";
+            } else {
+                formattedNum = num.toString();
+            }
+            return formattedNum;
+        }
+
+        function parseShaderISF(src) {
+
+            let re = RegExp(/\/\*[\n\r\s]*{[\s\S]*}[\n\r\s]*\*\//);
+
+            let result = re.exec(src);
+            if (result === null) {
+                throw "Can't parse json.";
+            }
+
+            let jsonParams = JSON.parse(result[0].slice(2, -2));
+            if (jsonParams === null) {
+                throw "Can't parse json.";
+            }
+
+            let txtParams = "";
+            if (jsonParams["INPUTS"] != null) {
+                jsonParams["INPUTS"].forEach(param => {
+                    if (param["TYPE"] == "float") {
+                        if (param["NAME"] != null && param["DEFAULT"] != null) {
+                            let defaultnum = formatFloat(param["DEFAULT"]);
+                            txtParams += "const float " + param["NAME"] + "=" + defaultnum + ";";
+                        } else {
+                            throw "Malformed json.";
+                        }
+                    } else {
+                        throw "The shader parser only handle float parameters right now.";
+                    }
+                });
+            }
+
+            return txtParams;
+        }
+
+        function getShader(name, source = null) {
+            let sourceElement;
+            if (source == null) {
+                sourceElement = document.getElementById(name);
+            } else {
+                sourceElement = { text: source, type: "x-shader/x-fragment" };
+            }
+            let fullSource;
+
+            if (sourceElement.type == "x-shader/x-fragment") {
+                let fragheader = "precision mediump float;uniform vec2 RENDERSIZE;uniform float TIME;";
+                let paramstxt = parseShaderISF(sourceElement.text);
+                shader = gl.createShader(gl.FRAGMENT_SHADER);
+                fullSource = fragheader + paramstxt + sourceElement.text;
+            } else if (sourceElement.type == "x-shader/x-vertex") {
+                shader = gl.createShader(gl.VERTEX_SHADER);
+                fullSource = sourceElement.text;
+            } else {
+                return null;
+            }
+
+            gl.shaderSource(shader, fullSource);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                output("error shader: " + gl.getShaderInfoLog(shader));
+                return null;
+            }
+
+            return shader;
+        }
+
+        function compileProgram(name, source = null) {
+            let frag = getShader(name, source);
+            let vert = getShader("shader-vs");
+
+            let program = gl.createProgram();
+            gl.attachShader(program, vert);
+            gl.attachShader(program, frag);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                output("can't init shader");
+            }
+
+            return program;
+        }
+
+        function init() {
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clearColor(1.0, 1.0, 1.0, 1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.enable(gl.CULL_FACE);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+            var vertices = [
+                1.0, 1.0, 0.0,
+                -1.0, 1.0, 0.0,
+                1.0, -1.0, 0.0,
+                -1.0, -1.0, 0.0
+            ];
+
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
+
+            defaultProgram = compileProgram("default");
+            currentProgramIdx = 0;
+            loadCurrentProgram();
+
+        }
+
+        function returnCurrentProgram() {
+            if (playlist.length == 0 || playlist[currentProgramIdx].program == null) {
+                currentProgramIdx = 0;
+                return defaultProgram;
+            } else {
+                return playlist[currentProgramIdx].program;
+            }
+        }
+
+        function loadCurrentProgram() {
+
+            let program = returnCurrentProgram();
+
+            gl.useProgram(program);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            vertexPositionAttribute = gl.getAttribLocation(program, "aVertexPosition");
+            gl.enableVertexAttribArray(vertexPositionAttribute);
+            gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 0, 0);
+
+            //startGlobalTime = new Date().getTime();
+            frames = 0;
+        }
+
+        function draw() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            //var current = new Date().getTime();
+            //var elapsedTime = (current - startGlobalTime)/ 1000.0;
+            let elapsedTime = frames / fps;
+
+            let program = returnCurrentProgram();
+
+            gl.uniform2f(gl.getUniformLocation(program, "RENDERSIZE"), canvas.width, canvas.height);
+            gl.uniform1f(gl.getUniformLocation(program, "TIME"), elapsedTime);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+
+        function playNext() {
+            paused = true;
+
+            currentProgramIdx++;
+            currentProgramIdx = currentProgramIdx % playlist.length;
+
+            loadCurrentProgram();
+            updateFileList();
+            paused = false;
+        }
+
+        function frame() {
+            if (!paused) {
+                frames++;
+                $("#frames").innerHTML = frames + "/" + timePerProgram * fps;//(frames / fps).toFixed(2);
+                draw();
+            }
+
+            if (frames == timePerProgram * fps) {
+                playNext();
+            }
+
+            window.requestAnimationFrame(frame);
+        }
+
+        function updateFileList() {
+            const fileQueueElement = $("#file-queue");
+            fileQueueElement.innerHTML = ""; // reset
+
+            playlist.forEach((file, idx) => {
+                const item = document.createElement("li");
+                item.innerHTML = idx == currentProgramIdx ? "current: " : "";
+                item.innerHTML += file.name;
+                fileQueueElement.appendChild(item);
+            });
+
+        }
+
+        function fileExists(filename) {
+            let exists = false;
+            playlist.forEach(file => {
+                if (file.name == filename) {
+                    exists = true;
+                }
+            });
+            return exists;
+        }
+
+        function queueFile(filename, filecontent) {
+            if (!fileExists(filename)) {
+                paused = true;
+                let program = compileProgram(filename, filecontent);
+                let newFile = { name: filename, src: filecontent, program: program };
+                playlist.push(newFile);
+                paused = false;
+                playNext();
+            } else {
+                output(filename + " already exists.");
+            }
+        }
+
+        function processFile(file) {
+            let reader = new FileReader();
+
+            reader.onload = function (e) {
+                //output(e.target.result);
+                output(file.name + " loaded.");
+                queueFile(file.name, e.target.result);
+                updateFileList();
+            }
+
+            reader.onerror = function (e) {
+                output("Can't load " + file.name);
+            }
+
+            reader.readAsText(file);
+        }
+
+        let fileInput = $("#input-file");
+        fileInput.addEventListener("change", function () {
+            let fileList = this.files;
+            output(fileList.length + " file(s) uploaded.");
+            for (let i = 0; i < fileList.length; i++) {
+                let file = fileList[i];
+                processFile(file);
+            }
+
+        }, false);
+
+
+        updateFileList();
+        output("file upload logs>");
+
+        canvas.addEventListener("mousedown", e => {
+        });
+
+        $("#play").addEventListener("click", e => {
+            paused = !paused;
+        });
+
+        $("#next").addEventListener("click", e => {
+            playNext();
+        });
+
+        init();
+        window.requestAnimationFrame(frame);
+
+    </script>
+</body>
+
+</html>

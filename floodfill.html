@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Floodfill
+    </title>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+        ctx.imageSmoothingEnabled = false;
+
+        const pixToIndex = p => p.x + p.y * canvas.width;
+        const indexToPix = i => ({ x: i % canvas.width, y: Math.floor(i / canvas.width) });
+
+        const pixToIndexRGBA = p => 4 * pixToIndex(p);
+        const indexToPixRGBA = i => ({ x: (i / 4) % canvas.width, y: Math.floor((i / 4) / canvas.width) });
+
+        function rgbaset(x, r, g, b, a, i) {
+            x[4 * i + 0] = r;
+            x[4 * i + 1] = g;
+            x[4 * i + 2] = b;
+            x[4 * i + 3] = a;
+        }
+
+        const rgbset = (x, r, g, b, i) => rgbaset(x, r, g, b, 255, i);
+        const lumaset = (x, v, i) => rgbaset(x, v, v, v, 255, i);
+        const lumaon = (x, i) => rgbaset(x, 255, 255, 255, 255, i);
+        const lumaoff = (x, i) => rgbaset(x, 0, 0, 0, 255, i);
+
+        const black = 0;
+        let threshold = 100;
+
+        const equalPoints = (a, b) => a.x == b.x && a.y == b.y;
+
+        function drawLine(points) {
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            points.slice(1).forEach(v => ctx.lineTo(v.x, v.y));
+            ctx.stroke();
+        }
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, width, height);
+
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.strokeStyle = "black";
+            //ctx.rotate(20 * Math.PI / 180)
+            ctx.strokeRect(50, 50, 100, 100);
+            ctx.strokeRect(80, 70, 100, 100);
+
+            drawLine([{ x: 50, y: 50 }, { x: 150, y: 70 }, { x: 170, y: 40 }, { x: 40, y: 30 }, { x: 50, y: 50 }]);
+        }
+
+        function isInBounds(p) {
+            return (p.x >= 0 && p.x < canvas.width) && (p.y >= 0 && p.y < canvas.height);
+        }
+
+        // g: grid
+        // v: index
+        // return: [index]
+        // Von Neumann neighborhood
+        function neighbors(g, v) {
+            let n = [];
+            let directions = [
+                { x: 0, y: -1 },//n
+                { x: 0, y: 1 },//e
+                { x: 1, y: 0 },//s
+                { x: -1, y: 0 },//w
+            ];
+
+            directions.forEach(
+                (_, idx) => {
+                    let neighbor = { x: 0, y: 0 };
+                    let p = indexToPixRGBA(v);
+                    neighbor.x = p.x + directions[idx].x;
+                    neighbor.y = p.y + directions[idx].y;
+                    //console.log("neighbors p.x: " + neighbor.x + " : p.y: " + neighbor.y) 
+                    let i = pixToIndexRGBA(neighbor);
+                    if (isInBounds(neighbor) && g[i] > threshold) {// test just chan R
+                        n.push(i)
+                    }
+                }
+            );
+
+            return n;
+        }
+
+        // g: RGBA pixel grid (mutable)
+        // v: index
+        function bfs(g, v) {
+            let q = [v];
+            while (q.length != 0) {
+                v = q.shift();
+                if (g[v] > threshold) {
+                    //console.log(v);
+                    g[v + 0] = black;
+                    g[v + 1] = black;
+                    g[v + 2] = black;
+                    g[v + 3] = 255;
+
+                    let n = neighbors(g, v);
+                    n.forEach(e => {
+                        if (g[e] > threshold) {
+                            q.push(e);
+                        }
+                    });
+                }
+            }
+        }
+
+        function floodfill(p) {
+            let initBuffer = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            let newBuffer = ctx.createImageData(initBuffer);
+            newBuffer.data.forEach((_, i) => newBuffer.data[i] = initBuffer.data[i]);
+
+            let i = pixToIndexRGBA(p);
+
+            /* let base = canvas.width * 60;
+             for(x=base;x<base+canvas.width;x++){
+                 newBuffer.data[x*4] = 0;
+                 newBuffer.data[x*4 +1] = 0;
+                 newBuffer.data[x*4+2] = 0;
+                 newBuffer.data[x*4+3] = 255;
+             }*/
+
+            bfs(newBuffer.data, i)
+
+            ctx.putImageData(newBuffer, 0, 0);
+        }
+
+
+        canvas.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+        });
+
+        canvas.addEventListener("pointerdown", (e) => {
+            let r = canvas.getBoundingClientRect();
+            let pointerPosition = {
+                x: Math.floor((e.clientX - r.left) * pixelRatio),
+                y: Math.floor((e.clientY - r.top) * pixelRatio)
+            };
+
+            floodfill(pointerPosition);
+        });
+
+        drawCanvas();
+
+    </script>
+</body>
+
+</html>

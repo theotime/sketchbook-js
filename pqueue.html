@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Priority queue
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="output">
+        <p></p>
+    </div>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+
+        // Priority queue as a min heap (binary tree) implementation with an array
+        // lowest number has a higher priority
+        // if two object have the same priority, order is undefined between them
+        // internal structure: [(priority, value)]
+
+        let swap = (a, m, n) => [a[m], a[n]] = [a[n], a[m]];
+        let left = (i) => 2 * i + 1;
+        let right = (i) => 2 * i + 2;
+        let parent = (i) => Math.floor((i - 1) / 2);
+        let exists = (i, s) => i < s;
+        let isleaf = (i, s) => !exists(left(i), s) && !exists(right(i), s);
+
+        function siftup(bintree, i) {
+            let pnode = i;
+            while (pnode > 0) {
+                pnode = parent(i);
+                if (bintree[i][0] < bintree[pnode][0]) {
+                    swap(bintree, i, pnode);
+                    i = pnode;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        function siftdown(bintree, i) {
+            let s = bintree.length;
+            while (!isleaf(i, s)) {
+                //largest between the triplet i, and two children
+                let lidx = left(i);
+                let ridx = right(i);
+
+                let priority = bintree[i][0];
+                let lpriority = exists(lidx, s) ? bintree[lidx][0] : priority + 1;
+                let rpriority = exists(ridx, s) ? bintree[ridx][0] : priority + 1;
+                let [maxidx, maxpriority] = lpriority < rpriority ? [lidx, lpriority] : [ridx, rpriority];
+                if (maxpriority < priority) {
+                    swap(bintree, i, maxidx);
+                    i = maxidx;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        function dequeue(bintree) {
+            let value = bintree[0][1];
+            swap(bintree, 0, bintree.length - 1);
+            bintree.pop();
+            siftdown(bintree, 0);
+            return value;
+        }
+
+        function enqueue(bintree, value, priority) {
+            bintree.push([priority, value]);
+            siftup(bintree, bintree.length - 1);
+        }
+
+        data = [];
+        enqueue(data, 'd', 5);
+        enqueue(data, 'a', 0);
+        enqueue(data, 'b', 1);
+        enqueue(data, 'e', 7);
+        enqueue(data, 'c', 2);
+        enqueue(data, 'b2', 1);
+        enqueue(data, 'a2', 0);
+
+        output("[" + data.toString() + "]");
+        v = dequeue(data);
+        output(v + ":[" + data.toString() + "]");
+        v = dequeue(data);
+        output(v + ":[" + data.toString() + "]");
+        v = dequeue(data);
+        output(v + ":[" + data.toString() + "]");
+        v = dequeue(data);
+        output(v + ":[" + data.toString() + "]");
+        v = dequeue(data);
+        output(v + ":[" + data.toString() + "]");
+        v = dequeue(data);
+        output(v + ":[" + data.toString() + "]");
+
+    </script>
+</body>
+
+</html>
