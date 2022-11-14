@@ -27,6 +27,25 @@
             $("#output p").innerHTML = txt;
         }
 
+        // helpers for linear algebra basics, operations on vec3
+        const neg = (v) => [-v[0], -v[1], -v[2]];
+        const add = (v1, v2) => [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]];
+        const sub = (v1, v2) => [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]];
+        const dot = (v1, v2) => v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+        const length = (v) => Math.sqrt(dot(v, v));
+        const normalize = (v) => {
+            let len = length(v);
+            return [v[0] / len, v[1] / len, v[2] / len]
+        };
+        // https://en.wikipedia.org/wiki/Cross_product#Coordinate_notation
+        // a2*b3 - a3*b2, a3*b1 - a1*b3, a1*b2 - a2*b1
+        const cross = (v1, v2) => [
+            v1[1] * v2[2] - v1[2] * v2[1],
+            v1[2] * v2[0] - v1[0] * v2[2],
+            v1[0] * v2[1] - v1[1] * v2[0]
+        ];
+
+
         class Mat4x4 {
 
             // column-major: computation & array declaration (OpenGL format)
@@ -107,6 +126,49 @@
                     0, 0, 1, 0,
                     tx, ty, tz, 1
                 ]; // column-major
+            }
+
+            // http://www.songho.ca/opengl/gl_camera.html
+            //
+            // lx   ly   lz   -lx*ex-ly*ey-lz*ez
+            // ux   uy   uz   -ux*ex-uy*ey-uz*ez
+            // fx   fy   fz   -fx*ex-fy*ey-fz*ez
+            // 0    0    0    1
+            lookAt(eye, center, up) { // vec3
+                let f = normalize(sub(eye, center));
+                let l = normalize(cross(up, f));
+                let u = cross(f, l);
+
+                this.value = [
+                    l[0], u[0], f[0], 0,
+                    l[1], u[1], f[1], 0,
+                    l[2], u[2], f[2], 0,
+                    dot(l, neg(eye)), dot(u, neg(eye)), dot(f, neg(eye)), 1
+                ]; // column-major
+
+            }
+
+            // http://www.songho.ca/opengl/gl_projectionmatrix.html
+            // (with t = tanfov * n, r = t * aspect)
+            //
+            // S1   0   0   0
+            // 0   S2   0   0
+            // 0     0   A   B
+            // 0     0   -1  0
+            // S1 = 1/(aspect * tanfov)   S2 = 1/tanfov
+            // A = -(f+n)/(f-n)   B = -(2*f*n)/(f-n)
+            perspective(fov, aspect, near, far) {
+                let tanfov = Math.tan((fov * Math.PI) / 360.0);
+                let S1 = 1.0 / (aspect * tanfov);
+                let S2 = 1.0 / tanfov;
+                let A = -(far + near) / (far - near);
+                let B = -(2 * far * near) / (far - near);
+                this.value = [
+                    S1, 0, 0, 0,
+                    0, S2, 0, 0,
+                    0, 0, A, -1,
+                    0, 0, B, 0
+                ];
             }
 
             // sx  0  0   0
@@ -206,6 +268,14 @@
         let mresult2 = rx30.multiplyMat4x4(s1); // r * s
         mresult2 = t1.multiplyMat4x4(mresult2); // t * (r * s)
 
+        let view = new Mat4x4();
+        view.lookAt([0, 0, 3], [0, 0, 0], [0, 1, 0]);
+
+        let persp = new Mat4x4();
+        //persp.perspective(45, 1.778, 0.1, 100.0);
+        persp.perspective(90, 1.333, 0.3, 1000.0);
+
+
         output("init");
         output("----");
         output();
@@ -233,6 +303,31 @@
         output();
         output(mresult1.toString(0));
         output(mresult2.toString(3));
+        output();
+        output("lookAt & perspective");
+        output("--------------------");
+        output();
+        output(view.toString(0));
+        output(persp.toString(3));
+
+
+        // vectors
+        /*
+        let a = [0, 0, 1];
+        let b = [1, 0, 0];
+        let c = [1, 1, 1];
+        output();
+        output("vec3 algebra");
+        output("---------------------");
+        output();
+        output(dot(a, b));
+        output(length(c));
+        output(normalize(c));
+        output(cross(a, b));
+        output(neg(a));
+        output(add(a, c));
+        output(sub(a, c));
+        */
 
 
     </script>

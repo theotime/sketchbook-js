@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        WebMIDI
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="output">
+        <p></p>
+    </div>
+    <div id="midi-out">
+        <p>Message hex data: </p>
+    </div>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        function midiout(s = "") {
+            //var txt = $("#midi-out p").innerHTML;
+            //txt += s + "<br>";
+            $("#midi-out p").innerHTML = s;
+        }
+
+        // https://developer.mozilla.org/en-US/docs/Web/API/Web_MIDI_API
+        // https://www.smashingmagazine.com/2018/03/web-midi-api/
+
+        const clamp = (x, min = 0, max = 1) => Math.min(max, Math.max(min, x));
+        const invlerp = (x, min, max) => clamp((x - min) / (max - min));
+
+        const minValue = 0;
+        const maxValue = 127;
+
+        function getMidiMessage(msg) {
+            //console.log(msg);
+            let str = "Message hex data: ";
+            for (const character of msg.data) {
+                str += ` 0x${character.toString(16)}`;
+            }
+
+            let value = invlerp(msg.data[2], minValue, maxValue);
+            midiout(str + ` (knob = ${msg.data[1]}, value = ${value.toFixed(2)}`);
+            //midiout("byte0: " + msg.data[0]);
+        }
+
+        if (navigator.requestMIDIAccess) {
+            output("AVAILABLE");
+
+            navigator.requestMIDIAccess().then(
+                function (midiAccess) {
+                    output("MIDI ready.");
+
+                    output("-- INPUTS --");
+                    for (const entry of midiAccess.inputs) {
+                        const inputDevice = entry[1];
+
+                        output("input type: " + inputDevice.type);
+                        output("input id: " + inputDevice.id);
+                        output("input manufacturer: " + inputDevice.manufacturer);
+                        output("input name: " + inputDevice.name);
+                        output("input version: " + inputDevice.version);
+                        output(">");
+
+                        inputDevice.onmidimessage = getMidiMessage;
+                    }
+
+                    output("-- OUTPUTS --");
+                    for (const entry of midiAccess.outputs) {
+                        const outputDevice = entry[1];
+
+                        output("output type: " + outputDevice.type);
+                        output("output manufacturer: " + outputDevice.manufacturer);
+                        output("output version: " + outputDevice.version);
+                        output(">");
+                    }
+
+                    output("Done.");
+                },
+                function (msg) {
+                    output("Failed to get MIDI - " + msg)
+                }
+            );
+
+        } else {
+            output("NOT AVAILABLE");
+        }
+    </script>
+</body>
+
+</html>
