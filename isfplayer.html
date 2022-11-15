@@ -42,6 +42,15 @@
         }
     </script>
     <script>
+
+        /*
+        Video player for ISF shader format.
+        Specification of the format: https://docs.isf.video/
+
+        This is a prototype, specification is not fully implemented, and errors are loosely handled.
+
+        */
+
         const $ = (e) => document.querySelector(e);
         const $$ = (e) => document.querySelectorAll(e);
 
@@ -71,6 +80,7 @@
         // Globals
         //var startGlobalTime;
         var frames;
+        var lastTime; // seconds
         var vertexPositionAttribute;
         var buffer;
         var currentProgramIdx;
@@ -119,8 +129,25 @@
                         } else {
                             throw "Malformed json.";
                         }
+                    } else if (param["TYPE"] == "bool") {
+                        if (param["NAME"] != null && param["DEFAULT"] != null) {
+                            txtParams += "const bool " + param["NAME"] + "=" + param["DEFAULT"] + ";";
+                        } else {
+                            throw "Malformed json.";
+                        }
+                    } else if (param["TYPE"] == "color") {
+                        if (param["NAME"] != null && param["DEFAULT"] != null) {
+                            let d0 = formatFloat(param["DEFAULT"][0]);
+                            let d1 = formatFloat(param["DEFAULT"][1]);
+                            let d2 = formatFloat(param["DEFAULT"][2]);
+                            let d3 = formatFloat(param["DEFAULT"][3]);
+                            let defaultcol = `vec4(${d0},${d1},${d2},${d3})`;
+                            txtParams += "const vec4 " + param["NAME"] + "=" + defaultcol + ";";
+                        } else {
+                            throw "Malformed json.";
+                        }
                     } else {
-                        throw "The shader parser only handle float parameters right now.";
+                        throw "The shader parser only handle (float, bool, color) parameters right now.";
                     }
                 });
             }
@@ -139,7 +166,17 @@
 
             if (sourceElement.type == "x-shader/x-fragment") {
                 let fragheader = "precision mediump float;uniform vec2 RENDERSIZE;uniform float TIME;";
-                let paramstxt = parseShaderISF(sourceElement.text);
+                fragheader += "uniform float DELTATIME;uniform vec4 DATE;uniform int FRAMEINDEX;";
+                fragheader += "\r\n#define isf_FragNormCoord (gl_FragCoord.xy/RENDERSIZE)\r\n";
+
+                let paramstxt = "";
+                try {
+                    paramstxt = parseShaderISF(sourceElement.text);
+                } catch (err) {
+                    output(err);
+                    throw err;
+                }
+
                 shader = gl.createShader(gl.FRAGMENT_SHADER);
                 fullSource = fragheader + paramstxt + sourceElement.text;
             } else if (sourceElement.type == "x-shader/x-vertex") {
@@ -231,11 +268,18 @@
             //var current = new Date().getTime();
             //var elapsedTime = (current - startGlobalTime)/ 1000.0;
             let elapsedTime = frames / fps;
+            let deltaTime = elapsedTime - lastTime;
+            lastTime = elapsedTime;
 
             let program = returnCurrentProgram();
 
+            // https://docs.isf.video/ref_variables.html#automatically-declared-variables
+            // PASSINDEX not implemented
             gl.uniform2f(gl.getUniformLocation(program, "RENDERSIZE"), canvas.width, canvas.height);
+            gl.uniform4f(gl.getUniformLocation(program, "DATE"), 1903, 12, 28, elapsedTime % 60); // not implemented
+            gl.uniform1f(gl.getUniformLocation(program, "TIMEDELTA"), lastTime);
             gl.uniform1f(gl.getUniformLocation(program, "TIME"), elapsedTime);
+            gl.uniform1i(gl.getUniformLocation(program, "FRAMEINDEX"), frames);
 
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
