@@ -49,6 +49,10 @@
 
         This is a prototype, specification is not fully implemented, and errors are loosely handled.
 
+        If WebMIDI is supported by the browser and a midi input device is detected:
+        the first time a knob is modified, knob will be mapped automatically to the shader parameter (uniform), in 
+        declaration order.
+
         */
 
         const $ = (e) => document.querySelector(e);
@@ -85,15 +89,26 @@
         var buffer;
         var currentProgramIdx;
         var paused = false;
+        var midiEnabled = false;
 
         var defaultProgram = null;
         /* [{
             name: "shadername",
             src: "shader content",
-            program: null
+            program: null,
+            uniforms: [
+                {name, default, value, min, max}
+            ]
         }]*/
         var playlist = [];
+        var midiKnobs = {}; // key -> index in playlist[i].uniforms[]
 
+        const ERR_SHADER = [null, null];
+
+
+        /*
+            WEBGL/SHADERS MANAGEMENT
+        */
 
         function formatFloat(num) {
             let formattedNum;
@@ -119,19 +134,31 @@
                 throw "Can't parse json.";
             }
 
-            let txtParams = "";
+            let paramstxt = "";
+            let uniforms = [];
             if (jsonParams["INPUTS"] != null) {
                 jsonParams["INPUTS"].forEach(param => {
                     if (param["TYPE"] == "float") {
                         if (param["NAME"] != null && param["DEFAULT"] != null) {
-                            let defaultnum = formatFloat(param["DEFAULT"]);
-                            txtParams += "const float " + param["NAME"] + "=" + defaultnum + ";";
+                            paramstxt += "uniform float " + param["NAME"] + ";";
+
+                            let min = param["MIN"] != null ? param["MIN"] : 0; // arbitrary
+                            let max = param["MAX"] != null ? param["MAX"] : param["DEFAULT"] * 2; // arbitrary
+
+                            uniforms.push({
+                                name: param["NAME"],
+                                default: param["DEFAULT"],
+                                value: param["DEFAULT"],
+                                min: min,
+                                max: max
+                            });
+
                         } else {
                             throw "Malformed json.";
                         }
                     } else if (param["TYPE"] == "bool") {
                         if (param["NAME"] != null && param["DEFAULT"] != null) {
-                            txtParams += "const bool " + param["NAME"] + "=" + param["DEFAULT"] + ";";
+                            paramstxt += "const bool " + param["NAME"] + "=" + param["DEFAULT"] + ";";
                         } else {
                             throw "Malformed json.";
                         }
@@ -142,7 +169,7 @@
                             let d2 = formatFloat(param["DEFAULT"][2]);
                             let d3 = formatFloat(param["DEFAULT"][3]);
                             let defaultcol = `vec4(${d0},${d1},${d2},${d3})`;
-                            txtParams += "const vec4 " + param["NAME"] + "=" + defaultcol + ";";
+                            paramstxt += "const vec4 " + param["NAME"] + "=" + defaultcol + ";";
                         } else {
                             throw "Malformed json.";
                         }
@@ -152,7 +179,7 @@
                 });
             }
 
-            return txtParams;
+            return [paramstxt, uniforms];
         }
 
         function getShader(name, source = null) {
@@ -162,7 +189,9 @@
             } else {
                 sourceElement = { text: source, type: "x-shader/x-fragment" };
             }
+
             let fullSource;
+            let uniforms = [];
 
             if (sourceElement.type == "x-shader/x-fragment") {
                 let fragheader = "precision mediump float;uniform vec2 RENDERSIZE;uniform float TIME;";
@@ -171,7 +200,7 @@
 
                 let paramstxt = "";
                 try {
-                    paramstxt = parseShaderISF(sourceElement.text);
+                    [paramstxt, uniforms] = parseShaderISF(sourceElement.text);
                 } catch (err) {
                     output(err);
                     throw err;
@@ -183,7 +212,7 @@
                 shader = gl.createShader(gl.VERTEX_SHADER);
                 fullSource = sourceElement.text;
             } else {
-                return null;
+                return ERR_SHADER;
             }
 
             gl.shaderSource(shader, fullSource);
@@ -191,15 +220,19 @@
 
             if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
                 output("error shader: " + gl.getShaderInfoLog(shader));
-                return null;
+                return ERR_SHADER;
             }
 
-            return shader;
+            return [shader, uniforms];
         }
 
         function compileProgram(name, source = null) {
-            let frag = getShader(name, source);
-            let vert = getShader("shader-vs");
+            let [frag, uniforms] = getShader(name, source);
+            let vert = getShader("shader-vs")[0];
+
+            if (frag == null || vert == null) {
+                return ERR_SHADER;
+            }
 
             let program = gl.createProgram();
             gl.attachShader(program, vert);
@@ -207,18 +240,15 @@
             gl.linkProgram(program);
 
             if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-                output("can't init shader");
+                output("can't compile shader");
             }
 
-            return program;
+            return [program, uniforms];
         }
 
-        function init() {
+        function initWebgl() {
             gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
             gl.clearColor(1.0, 1.0, 1.0, 1.0);
-            gl.enable(gl.DEPTH_TEST);
-            gl.enable(gl.CULL_FACE);
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
             buffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -232,24 +262,23 @@
 
             gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
 
-            defaultProgram = compileProgram("default");
+            defaultProgram = compileProgram("default")[0];
             currentProgramIdx = 0;
             loadCurrentProgram();
-
         }
 
         function returnCurrentProgram() {
             if (playlist.length == 0 || playlist[currentProgramIdx].program == null) {
                 currentProgramIdx = 0;
-                return defaultProgram;
+                return [defaultProgram, []];
             } else {
-                return playlist[currentProgramIdx].program;
+                return [playlist[currentProgramIdx].program, playlist[currentProgramIdx].uniforms];
             }
         }
 
         function loadCurrentProgram() {
 
-            let program = returnCurrentProgram();
+            let program = returnCurrentProgram()[0];
 
             gl.useProgram(program);
 
@@ -263,7 +292,7 @@
         }
 
         function draw() {
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            gl.clear(gl.COLOR_BUFFER_BIT);
 
             //var current = new Date().getTime();
             //var elapsedTime = (current - startGlobalTime)/ 1000.0;
@@ -271,7 +300,7 @@
             let deltaTime = elapsedTime - lastTime;
             lastTime = elapsedTime;
 
-            let program = returnCurrentProgram();
+            let [program, uniforms] = returnCurrentProgram();
 
             // https://docs.isf.video/ref_variables.html#automatically-declared-variables
             // PASSINDEX not implemented
@@ -280,6 +309,8 @@
             gl.uniform1f(gl.getUniformLocation(program, "TIMEDELTA"), lastTime);
             gl.uniform1f(gl.getUniformLocation(program, "TIME"), elapsedTime);
             gl.uniform1i(gl.getUniformLocation(program, "FRAMEINDEX"), frames);
+
+            uniforms.forEach(e => gl.uniform1f(gl.getUniformLocation(program, e.name), e.value));
 
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
@@ -311,6 +342,10 @@
             window.requestAnimationFrame(frame);
         }
 
+        /*
+            FILE MANAGEMENT
+        */
+
         function updateFileList() {
             const fileQueueElement = $("#file-queue");
             fileQueueElement.innerHTML = ""; // reset
@@ -337,9 +372,13 @@
         function queueFile(filename, filecontent) {
             if (!fileExists(filename)) {
                 paused = true;
-                let program = compileProgram(filename, filecontent);
-                let newFile = { name: filename, src: filecontent, program: program };
-                playlist.push(newFile);
+                let [program, uniforms] = compileProgram(filename, filecontent);
+                if (program != null) {
+                    let newShader = { name: filename, src: filecontent, program: program, uniforms: uniforms };
+                    playlist.push(newShader);
+                } else {
+                    output("error with the shader, can't add to the playlist");
+                }
                 paused = false;
                 playNext();
             } else {
@@ -351,7 +390,6 @@
             let reader = new FileReader();
 
             reader.onload = function (e) {
-                //output(e.target.result);
                 output(file.name + " loaded.");
                 queueFile(file.name, e.target.result);
                 updateFileList();
@@ -375,12 +413,70 @@
 
         }, false);
 
+        /*
+            MIDI MANAGEMENT
+        */
 
-        updateFileList();
-        output("file upload logs>");
+        function setCurrentProgramUniform(index, value) {
+            const lerp = (x, min, max) => min + x * (max - min);
 
-        canvas.addEventListener("mousedown", e => {
-        });
+            if (playlist.length != 0 && playlist[currentProgramIdx].program != null) {
+                if (playlist[currentProgramIdx].uniforms[index] !== undefined) {
+                    let min = playlist[currentProgramIdx].uniforms[index].min;
+                    let max = playlist[currentProgramIdx].uniforms[index].max;
+                    playlist[currentProgramIdx].uniforms[index].value = lerp(value, min, max);
+                }
+            }
+        }
+
+        function getMidiMessage(msg) {
+            const clamp = (x, min = 0, max = 1) => Math.min(max, Math.max(min, x));
+            const invlerp = (x, min, max) => clamp((x - min) / (max - min));
+
+            let midiKey = msg.data[1];
+            let midiValue = invlerp(msg.data[2], 0, 127);
+            //output(str + ` (knob = ${msg.data[1]}, value = ${value.toFixed(2)}`);
+
+            if (midiKey in midiKnobs) {
+                setCurrentProgramUniform(midiKnobs[midiKey], midiValue);
+            } else {
+                midiKnobs[midiKey] = Object.keys(midiKnobs).length;
+            }
+        }
+
+        function initMidi() {
+            if (navigator.requestMIDIAccess) {
+                navigator.requestMIDIAccess().then(
+                    function (midiAccess) {
+                        let nbrDevices = 0;
+                        for (const entry of midiAccess.inputs) {
+                            const inputDevice = entry[1];
+                            inputDevice.onmidimessage = getMidiMessage;
+                            nbrDevices++;
+                        }
+
+                        if (nbrDevices) {
+                            midiEnabled = true;
+                            output("Notice: midi enabled.");
+                        } else {
+                            output("Notice: midi disabled, no input device.");
+                        }
+
+                    },
+                    function (msg) {
+                        output("Notice: midi disabled, " + msg);
+                    }
+                );
+            } else {
+                output("Notice: midi disabled.");
+            }
+        }
+
+        function init() {
+            initMidi();
+            initWebgl();
+        }
+
 
         $("#play").addEventListener("click", e => {
             paused = !paused;
@@ -390,6 +486,9 @@
             playNext();
         });
 
+
+        updateFileList();
+        output("isfplayer logs>");
         init();
         window.requestAnimationFrame(frame);
 
