@@ -66,7 +66,8 @@
 
         var canvas = $("#canvas");
         var gl = canvas.getContext("webgl", {
-            alpha: false
+            alpha: false,
+            depth: false
         });
 
         let width = 256, height = 256;
