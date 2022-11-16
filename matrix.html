@@ -27,23 +27,36 @@
             $("#output p").innerHTML = txt;
         }
 
-        // helpers for linear algebra basics, operations on vec3
-        const neg = (v) => [-v[0], -v[1], -v[2]];
-        const add = (v1, v2) => [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]];
-        const sub = (v1, v2) => [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]];
-        const dot = (v1, v2) => v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
-        const length = (v) => Math.sqrt(dot(v, v));
-        const normalize = (v) => {
-            let len = length(v);
-            return [v[0] / len, v[1] / len, v[2] / len]
+        // helpers for linear algebra R^3 basics
+        const Vec3 = {
+
+            back: [0, 0, -1],
+            down: [0, -1, 0],
+            forward: [0, 0, 1],
+            left: [-1, 0, 0],
+            one: [1, 1, 1],
+            right: [1, 0, 0],
+            up: [0, 1, 0],
+            zero: [0, 0, 0],
+
+            neg: (v) => [-v[0], -v[1], -v[2]],
+            add: (v1, v2) => [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]],
+            sub: (v1, v2) => [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]],
+            dot: (v1, v2) => v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2],
+            length: (v) => Math.sqrt(Vec3.dot(v, v)),
+            normalize: (v) => {
+                let len = Vec3.length(v);
+                return [v[0] / len, v[1] / len, v[2] / len]
+            },
+            // https://en.wikipedia.org/wiki/Cross_product#Coordinate_notation
+            // a2*b3 - a3*b2, a3*b1 - a1*b3, a1*b2 - a2*b1
+            cross: (v1, v2) => [
+                v1[1] * v2[2] - v1[2] * v2[1],
+                v1[2] * v2[0] - v1[0] * v2[2],
+                v1[0] * v2[1] - v1[1] * v2[0]
+            ]
         };
-        // https://en.wikipedia.org/wiki/Cross_product#Coordinate_notation
-        // a2*b3 - a3*b2, a3*b1 - a1*b3, a1*b2 - a2*b1
-        const cross = (v1, v2) => [
-            v1[1] * v2[2] - v1[2] * v2[1],
-            v1[2] * v2[0] - v1[0] * v2[2],
-            v1[0] * v2[1] - v1[1] * v2[0]
-        ];
+
 
 
         class Mat4x4 {
@@ -107,12 +120,19 @@
             // 2xz-2sy       2yz+2sx      1-2xx-2yy    0
             // 0             0            0            1
             fromQuaternion(x, y, z, w) {
+                // vector [x, y, z], scalar w
                 this.value = [
                     1 - 2 * y * y - 2 * z * z, 2 * x * y + 2 * w * z, 2 * x * z - 2 * w * y, 0, // column 1
                     2 * x * y - 2 * w * z, 1 - 2 * x * x - 2 * z * z, 2 * y * z + 2 * w * x, 0, // column 2
                     2 * x * z + 2 * w * y, 2 * y * z - 2 * w * x, 1 - 2 * x * x - 2 * y * y, 0, // column 3
                     0, 0, 0, 1
                 ];
+            }
+
+            fromAngleAxis(angle, axis) {
+                let cos = Math.cos(angle / 2.0);
+                let sin = Math.sin(angle / 2.0);
+                this.fromQuaternion(axis[0] * sin, axis[1] * sin, axis[2] * sin, cos);
             }
 
             // 1 0 0 tx
@@ -135,15 +155,15 @@
             // fx   fy   fz   -fx*ex-fy*ey-fz*ez
             // 0    0    0    1
             lookAt(eye, center, up) { // vec3
-                let f = normalize(sub(eye, center));
-                let l = normalize(cross(up, f));
-                let u = cross(f, l);
+                let f = Vec3.normalize(Vec3.sub(eye, center));
+                let l = Vec3.normalize(Vec3.cross(up, f));
+                let u = Vec3.cross(f, l);
 
                 this.value = [
                     l[0], u[0], f[0], 0,
                     l[1], u[1], f[1], 0,
                     l[2], u[2], f[2], 0,
-                    dot(l, neg(eye)), dot(u, neg(eye)), dot(f, neg(eye)), 1
+                    Vec3.dot(l, Vec3.neg(eye)), Vec3.dot(u, Vec3.neg(eye)), Vec3.dot(f, Vec3.neg(eye)), 1
                 ]; // column-major
 
             }
@@ -229,13 +249,16 @@
 
 
         let rx30 = new Mat4x4();
-        rx30.fromQuaternion(0.259, 0, 0, 0.966);
+        rx30.fromAngleAxis(30.0 * (Math.PI / 180.0), Vec3.right);
+        //rx30.fromQuaternion(0.259, 0, 0, 0.966);
 
         let rx45 = new Mat4x4();
-        rx45.fromQuaternion(0.3826834559440613, 0, 0, 0.9238795042037964);
+        rx45.fromAngleAxis(45.0 * (Math.PI / 180.0), Vec3.right);
+        //rx45.fromQuaternion(0.3826834559440613, 0, 0, 0.9238795042037964);
 
         let rx90 = new Mat4x4();
-        rx90.fromQuaternion(0.7071068286895752, 0, 0, 0.7071068286895752);
+        rx90.fromAngleAxis(90.0 * (Math.PI / 180.0), Vec3.right);
+        //rx90.fromQuaternion(0.7071068286895752, 0, 0, 0.7071068286895752);
 
         let tm1 = new Mat4x4();
         tm1.fromTranslate(1, 2, 3);
@@ -269,7 +292,7 @@
         mresult2 = t1.multiplyMat4x4(mresult2); // t * (r * s)
 
         let view = new Mat4x4();
-        view.lookAt([0, 0, 3], [0, 0, 0], [0, 1, 0]);
+        view.lookAt([0, 0, 3], Vec3.zero, Vec3.up);
 
         let persp = new Mat4x4();
         //persp.perspective(45, 1.778, 0.1, 100.0);
