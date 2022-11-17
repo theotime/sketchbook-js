@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Game Network (client text)
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="frames"></div>
+    <div>
+        <ul id="peer-states"></ul>
+    </div>
+    <div id="output">
+        <p></p>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+
+        /*
+            Simplest way to do multi-players game network.
+            Peer to peer implementation with a server acting as a relay to bypass NAT.
+            No security and no performance consideration, it's a naive simple implementation.
+            
+            Need nodejs, expressjs & socketio on the server side.
+
+            Each client has an id to identify itself on the network and a state.
+            Each client has a list of each other peers.
+
+            FSM:
+            connect -> {update, disconnect}
+            update -> {update, disconnect}
+            disconnect -> {connect}
+
+            [peer] connect -> [server-relay] auth-ack -> [peer]
+            [peer] update -> [server-relay] broadcast-update -> *[peers] :: registerNewPeer() & updatePeerState()
+            [peer] disconnect -> [server-relay] broadcast-disconnection -> *[peers] :: unregisterNewPeer()
+
+            [peer::gameloop]
+            updateState();
+            sendState();
+            showPeerStates();
+        */
+
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+
+        var auth = false;
+        var id = null;
+        var state = Math.floor(Math.random() * 100);
+
+        /*
+            id -> state
+        */
+        var peers = {};
+        var frames = 0;
+
+
+        function registerNewPeer(peerId) {
+            if (!(peerId in peers)) {
+                peers[peerId] = -1;
+            } else {
+                output(peerId + " already exists.");
+            }
+        }
+
+        function unregisterNewPeer(peerId) {
+            if (peerId in peers) {
+                delete peers[peerId];
+            } else {
+                output(peerId + " does not exists.");
+            }
+        }
+
+        function showPeerStates() {
+            const peerStatesElement = $("#peer-states");
+            peerStatesElement.innerHTML = "";
+
+            for (const [peerId, peerState] of Object.entries(peers)) {
+                const item = document.createElement("li");
+                if (peerId == id) {
+                    item.innerHTML += "(me) ";
+                }
+                item.innerHTML += `id: ${peerId}, state: ${peerState}`;
+                peerStatesElement.appendChild(item);
+            }
+        }
+
+        function showFrames() {
+            const framesElement = $("#frames");
+            framesElement.innerHTML = "frames: " + frames;
+        }
+
+        function updatePeerState(peerId, peerState) {
+            peers[peerId] = peerState;
+        }
+
+        function updateState() {
+            state++;
+        }
+
+        function sendState() {
+            if (auth) {
+                socket.emit("update", state);
+            }
+        }
+
+        function update() {
+            updateState();
+            sendState();
+        }
+
+        function display() {
+            showPeerStates();
+            showFrames();
+        }
+
+        function frame() {
+            frames++;
+            update();
+            display();
+        }
+
+
+        // game-loop
+        setInterval(frame, 1000);
+
+        // AUTH
+        const socket = io();
+
+        // RECV
+        socket.on("auth-ack", (msg) => {
+            id = msg;
+            auth = true;
+        });
+
+        let unserializeState = (serializedState) => serializedState.split(":");
+        socket.on("broadcast-update", (msg) => {
+            let [peerId, peerState] = unserializeState(msg);
+            if (!(peerId in peers)) {
+                registerNewPeer(peerId);
+                output(peerId + " now registered.");
+            }
+
+            updatePeerState(peerId, peerState);
+        });
+
+        socket.on("broadcast-disconnection", (msg) => {
+            unregisterNewPeer(msg);
+            output("broadcast-disconnection: " + msg);
+        });
+
+    </script>
+</body>
+
+</html>
