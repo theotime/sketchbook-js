@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        WebGL UV cube
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="frames"></div>
+    <div id="output">
+        <p></p>
+    </div>
+    <script src="matrix.js"></script>
+    <script>
+        // data from: https://learnopengl.com/Getting-started/Camera
+        // culling cannot be enabled, because triangles seems to be defined with different winding order
+        var primitiveCubeUv = [
+            -0.5, -0.5, -0.5, 0.0, 0.0,
+            0.5, -0.5, -0.5, 1.0, 0.0,
+            0.5, 0.5, -0.5, 1.0, 1.0,
+            0.5, 0.5, -0.5, 1.0, 1.0,
+            -0.5, 0.5, -0.5, 0.0, 1.0,
+            -0.5, -0.5, -0.5, 0.0, 0.0,
+
+            -0.5, -0.5, 0.5, 0.0, 0.0,
+            0.5, -0.5, 0.5, 1.0, 0.0,
+            0.5, 0.5, 0.5, 1.0, 1.0,
+            0.5, 0.5, 0.5, 1.0, 1.0,
+            -0.5, 0.5, 0.5, 0.0, 1.0,
+            -0.5, -0.5, 0.5, 0.0, 0.0,
+
+            -0.5, 0.5, 0.5, 1.0, 0.0,
+            -0.5, 0.5, -0.5, 1.0, 1.0,
+            -0.5, -0.5, -0.5, 0.0, 1.0,
+            -0.5, -0.5, -0.5, 0.0, 1.0,
+            -0.5, -0.5, 0.5, 0.0, 0.0,
+            -0.5, 0.5, 0.5, 1.0, 0.0,
+
+            0.5, 0.5, 0.5, 1.0, 0.0,
+            0.5, 0.5, -0.5, 1.0, 1.0,
+            0.5, -0.5, -0.5, 0.0, 1.0,
+            0.5, -0.5, -0.5, 0.0, 1.0,
+            0.5, -0.5, 0.5, 0.0, 0.0,
+            0.5, 0.5, 0.5, 1.0, 0.0,
+
+            -0.5, -0.5, -0.5, 0.0, 1.0,
+            0.5, -0.5, -0.5, 1.0, 1.0,
+            0.5, -0.5, 0.5, 1.0, 0.0,
+            0.5, -0.5, 0.5, 1.0, 0.0,
+            -0.5, -0.5, 0.5, 0.0, 0.0,
+            -0.5, -0.5, -0.5, 0.0, 1.0,
+
+            -0.5, 0.5, -0.5, 0.0, 1.0,
+            0.5, 0.5, -0.5, 1.0, 1.0,
+            0.5, 0.5, 0.5, 1.0, 0.0,
+            0.5, 0.5, 0.5, 1.0, 0.0,
+            -0.5, 0.5, 0.5, 0.0, 0.0,
+            -0.5, 0.5, -0.5, 0.0, 1.0
+        ];
+    </script>
+    <script id="default-vs" type="x-shader/x-vertex">
+        precision mediump float;
+        attribute vec3 aVertexPosition;
+        attribute vec2 aUV;
+
+        varying vec2 uv;
+
+        //uniform float time;
+        uniform mat4 MVP;
+    
+        void main(void) {
+            vec4 p = MVP * vec4(aVertexPosition, 1.0);
+            gl_Position = vec4(p);
+            uv = aUV;
+        }
+    </script>
+    <script id="default-fs" type="x-shader/x-fragment">
+        varying vec2 uv;
+
+        void main(void) {
+            gl_FragColor = vec4(uv, 0.0, 1.0);
+        }
+    </script>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        var canvas = $("#canvas");
+        var gl = canvas.getContext("webgl");
+
+        let width = 256, height = 256;
+        let pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+
+
+        // Parameters
+        var fps = 60.0;
+
+        var fov = 45.0;
+        var aspect = width / height;
+        var near = 0.1;
+        var far = 100.0;
+
+        var perspectiveMatrix = null;
+
+        // Globals
+        //var startGlobalTime;
+        var frames = 0;
+        var vertexPositionAttribute;
+        var buffer;
+        var paused = false;
+
+        var defaultMaterial = null;
+
+
+        function getShader(name) {
+            let sourceElement = document.getElementById(name);
+            let source;
+
+            if (sourceElement.type == "x-shader/x-fragment") {
+                let fragheader = "precision mediump float;uniform vec2 RENDERSIZE;uniform float TIME;";
+                shader = gl.createShader(gl.FRAGMENT_SHADER);
+                source = fragheader + sourceElement.text;
+            } else if (sourceElement.type == "x-shader/x-vertex") {
+                shader = gl.createShader(gl.VERTEX_SHADER);
+                source = sourceElement.text;
+            } else {
+                return null;
+            }
+
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                output("error shader: " + gl.getShaderInfoLog(shader));
+                return null;
+            }
+
+            return shader;
+        }
+
+        function compileProgram(name) {
+            let frag = getShader(name + "-fs");
+            let vert = getShader(name + "-vs");
+
+            let program = gl.createProgram();
+            gl.attachShader(program, vert);
+            gl.attachShader(program, frag);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                output("can't init shader");
+            }
+
+            return program;
+        }
+
+        function init() {
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clearColor(.1, .12, .1, 1.0);
+            gl.enable(gl.DEPTH_TEST);
+            //gl.enable(gl.CULL_FACE);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(primitiveCubeUv), gl.STATIC_DRAW);
+
+            defaultMaterial = compileProgram("default");
+            loadCurrentMaterial();
+
+            perspectiveMatrix = new Mat4x4();
+            perspectiveMatrix.perspective(fov, aspect, near, far);
+        }
+
+        function loadCurrentMaterial() {
+
+            let mat = defaultMaterial;
+
+            gl.useProgram(mat);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            vertexPositionAttribute = gl.getAttribLocation(mat, "aVertexPosition");
+            gl.enableVertexAttribArray(vertexPositionAttribute);
+            gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 5 * Float32Array.BYTES_PER_ELEMENT, 0);
+
+            vertexColorAttribute = gl.getAttribLocation(mat, "aUV");
+            gl.enableVertexAttribArray(vertexColorAttribute);
+            gl.vertexAttribPointer(vertexColorAttribute, 2, gl.FLOAT, false, 5 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+        }
+
+        function draw() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            //var current = new Date().getTime();
+            //var elapsedTime = (current - startGlobalTime)/ 1000.0;
+            let elapsedTime = frames / fps;
+
+            let mat = defaultMaterial;
+
+            let view = new Mat4x4();
+            let radius = 3;
+            let x = radius * Math.cos(elapsedTime);
+            let z = radius * Math.sin(elapsedTime);
+            view.lookAt([x, 1.5, z], Vec3.zero, Vec3.up);
+            let mvp = perspectiveMatrix.multiplyMat4x4(view);
+
+            //gl.uniform1f(gl.getUniformLocation(mat, "time"), elapsedTime);
+            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "MVP"), false, mvp.array());
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 36);
+        }
+
+        function frame() {
+            if (!paused) {
+                frames++;
+                $("#frames").innerHTML = (frames / fps).toFixed(2);
+                draw();
+            }
+
+            window.requestAnimationFrame(frame);
+        }
+
+        init();
+        window.requestAnimationFrame(frame);
+
+    </script>
+</body>
+
+</html>
