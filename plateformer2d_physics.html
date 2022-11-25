@@ -238,10 +238,10 @@
             acceleration is instantaneous, and turn-around is quasi instaneous.
             deceleration is a linear decrease.
         */
-        let clamp = (x, min, max) => Math.max(Math.min(x, x, max), x, min);
+        let clamp = (x, min, max) => Math.max(Math.min(x, max), min);
         function updateXQuake(isCollision) {
             let maxspeed = 12;
-            let friction = .9;
+            let friction = .85;
 
             let direction = 0;
             if (rightPressed) {
