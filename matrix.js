@@ -1,4 +1,9 @@
-// helpers for linear algebra R^3 basics
+/*
+    Matrix 4x4 and Vec3 operations.
+    Should be enough for a small 3D engine. 
+*/
+
+// helpers for linear algebra basics
 const Vec3 = {
 
     back: [0, 0, -1],
@@ -10,6 +15,7 @@ const Vec3 = {
     up: [0, 1, 0],
     zero: [0, 0, 0],
 
+    copy: (v) => [...v],
     neg: (v) => [-v[0], -v[1], -v[2]],
     add: (v1, v2) => [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]],
     sub: (v1, v2) => [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]],

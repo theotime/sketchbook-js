@@ -23,6 +23,7 @@
     <script src="geoprimitives.js"></script>
     <script id="default-vs" type="x-shader/x-vertex">
         precision mediump float;
+
         attribute vec3 aVertexPosition;
         attribute vec3 aNormal;
         //attribute vec2 aUV;
@@ -45,6 +46,8 @@
         }
     </script>
     <script id="default-fs" type="x-shader/x-fragment">
+        precision mediump float;
+
         //varying vec2 uv;
         varying vec3 normal;
 
@@ -226,20 +229,9 @@
 
         function getShader(name) {
             let sourceElement = document.getElementById(name);
-            let source;
-
-            if (sourceElement.type == "x-shader/x-fragment") {
-                let fragheader = "precision mediump float;uniform vec2 RENDERSIZE;uniform float TIME;";
-                shader = gl.createShader(gl.FRAGMENT_SHADER);
-                source = fragheader + sourceElement.text;
-            } else if (sourceElement.type == "x-shader/x-vertex") {
-                shader = gl.createShader(gl.VERTEX_SHADER);
-                source = sourceElement.text;
-            } else {
-                return null;
-            }
-
-            gl.shaderSource(shader, source);
+            let type = sourceElement.type == "x-shader/x-fragment" ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER;
+            let shader = gl.createShader(type)
+            gl.shaderSource(shader, sourceElement.text);
             gl.compileShader(shader);
 
             if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
