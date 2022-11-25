@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Plateformer 2d physics
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div>velX: <span id="velX">1.0</span> posX: <span id="posX">1.0</span> velY: <span id="velY">1.0</span> posY: <span
+            id="posY">1.0</span> </div>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256 * 3, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+
+        // Inputs
+        let upPressed, downPressed, leftPressed, rightPressed;
+        let keyboardEnum = { left: 37, up: 38, right: 39, down: 40 };
+
+        // Entity
+        let player = {
+            posX: width / 2,
+            posY: height / 2,
+            velX: 0,
+            velY: 0,
+            size: 16,
+            jumping: false
+        };
+
+        const jump = 25;
+        const gravity = 2;
+
+        function fillCircle(px, py, r) {
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        const keyDownHandler = event => keyHandler(event, true);
+        const keyUpHandler = event => keyHandler(event, false);
+        function keyHandler(event, state) {
+            if (event.keyCode == keyboardEnum.right) {
+                rightPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.left) {
+                leftPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.down) {
+                downPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.up) {
+                upPressed = state;
+            }
+        }
+
+        // character collision against the borders
+        function handlePlayerCollisions() {
+            isCollision = { l: false, r: false, t: false, b: false };
+
+            if (player.posX - player.size - player.velX < 0) {
+                isCollision.l = true;
+            }
+
+            if (player.posX + player.size + player.velX > width) {
+                isCollision.r = true;
+            }
+
+            if (player.posY - player.size - player.velY < 0) {
+                isCollision.t = true;
+            }
+
+            if (player.posY + player.size + player.velY > height) {
+                isCollision.b = true;
+            }
+
+            return isCollision;
+        }
+
+        /*
+        function handleInputs(isCollision) {
+            if (rightPressed && !isCollision.r) {
+                player.posX += player.speedX;
+            } else if (leftPressed && !isCollision.l) {
+                player.posX -= player.speedX;
+            }
+
+            if (!isCollision.t && !isCollision.b) {
+                player.posY += player.speedY;
+            }
+
+            if (upPressed && !player.jumping) {
+                player.jumping = true;
+                player.speedY = -jump;
+            }
+
+            if (!isCollision.b) {
+                player.speedY += gravity;
+            } else {
+                player.posY = height - player.size;
+                player.jumping = false;
+            }
+        }
+        */
+
+        /*
+            F = ma
+
+            Gravity f = -mg
+
+            -- analytics
+            a(t) = -g
+            v(t) = v0 - g * t
+            x(t) = x0 + v0*t - g * 1/2 * t * t
+
+            -- euler implicit
+            y' = f(t,y)
+            y = y0 + f(t1,y1)*(t-t0)
+
+            a(t) = -g
+            v(t) = v(t-1) + a(t)*dt
+            x(t) = x(t-1) + v(t)*dt
+
+            let acc = 2; // m = 1, dt = 1
+            vel = vel + acc;
+            pos = pos + vel;
+        */
+        function updateY(isCollision) {
+            let maxfall = 10;
+
+            if (upPressed && !player.jumping) {
+                player.jumping = true;
+                player.velY = -jump;
+            }
+
+            if (!isCollision.b) {
+                player.velY += gravity;
+                if (player.velY > 0) {
+                    player.velY = Math.min(player.velY, maxfall);
+                }
+
+            } else {
+                player.posY = height - player.size;
+                player.jumping = false; // XXX should add a small cooldown
+            }
+
+            if (!isCollision.t && !isCollision.b) {
+                player.posY += player.velY;
+            }
+        }
+
+        // Equivalent to handleInputs(): instant speed
+        function updateXInstant(isCollision) {
+            let maxspeed = 12;
+            let accX = .5;
+
+            let vel = 0;
+            if (rightPressed) {
+                vel = maxspeed;
+            } else if (leftPressed) {
+                vel = - maxspeed;
+            }
+
+            player.velX = vel;
+            player.posX += player.velX;
+        }
+
+        /*
+            reference: https://gmtk.itch.io/platformer-toolkit
+
+            Same as (Unity): velocity.x = Mathf.MoveTowards(velocity.x, desiredVelocity.x, maxSpeedChange);
+            MoveTowards(src, tar, step)
+            => src += step, min(src, tar) // src < tar
+            => src -= step, max(src, tar) // src > tar
+
+            src = velocity, tar = maxspeed or 0, step = acceleration/deceleration
+            If no inputs, tar = 0
+        */
+        function updateX(isCollision) {
+
+            let maxspeed = 12;
+            let accX = .5;
+            //let friction = 6;
+            //maxspeed -= friction;
+
+            if (rightPressed) {
+                player.velX += accX;
+            } else if (leftPressed) {
+                player.velX -= accX;
+            } else {
+                player.velX -= Math.sign(player.velX) * accX; // deceleration
+                if (Math.abs(player.velX) < 0.01) {
+                    player.velX = 0;
+                }
+            }
+            player.velX = Math.sign(player.velX) * Math.min(Math.abs(player.velX), maxspeed);
+
+            player.posX += player.velX;
+        }
+
+        /*
+            Implementation inspired from Quake engine:
+            https://www.youtube.com/watch?v=v3zT3Z5apaM
+            https://github.com/id-Software/Quake/blob/master/WinQuake/sv_user.c
+
+            vel = vel * f + clamp(maxspeed - vel * f * direction) * direction
+
+            vel = maxspeed              (1) instant speed, when direction = 1
+            vel = vel * f - maxspeed    (2) when direction = -1
+            vel = vel * f               (3) when direction = 0
+                
+            vel(0) = 0:
+                (1) vel = maxspeed, (2) vel = -maxspeed, (3) vel = 0
+            vel(0) = maxspeed:
+                (1) vel = maxspeed, (2) vel = maxspeed * f - maxspeed, (3) vel = maxspeed * f
+            vel(0) = v(t)
+                (1) vel = maxspeed, (2) vel = v(t) * f - maxspeed, (3) vel = v(t) * f
+
+            acceleration is instantaneous, and turn-around is quasi instaneous.
+            deceleration is a linear decrease.
+        */
+        let clamp = (x, min, max) => Math.max(Math.min(x, x, max), x, min);
+        function updateXQuake(isCollision) {
+            let maxspeed = 12;
+            let friction = .9;
+
+            let direction = 0;
+            if (rightPressed) {
+                direction = 1;
+            } else if (leftPressed) {
+                direction = -1;
+            }
+
+            let vel = player.velX;
+
+            vel *= friction;
+            let curvel = vel * direction; // dot(vel, wishdir)
+            let addvel = clamp(maxspeed - curvel, 0, maxspeed);
+
+            vel += addvel * direction;
+
+            player.velX = vel;
+            player.posX += player.velX;
+        }
+
+        // fixed update, fixed framerate (but not framerate indepedent)
+        // speed of the simulation change if you change the framerate
+        // increase or decrease update() calls updates faster or slower the simulation (player speed/position)
+        // add *dt(framerate) to make it indepedent
+        function update() {
+            var isCollision = handlePlayerCollisions();
+            //handleInputs(isCollision);
+            updateY(isCollision);
+            updateXQuake(isCollision);
+        }
+
+        function draw() {
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.fillStyle = "tomato";
+            fillCircle(player.posX, player.posY, player.size);
+        }
+
+        function frame() {
+            update();
+            draw();
+
+            updateUI();
+
+            requestAnimationFrame(frame);
+        }
+
+        function updateUI() {
+            $("#posX").innerText = player.posX.toFixed(2);
+            $("#posY").innerText = player.posY.toFixed(2);
+            $("#velX").innerText = player.velX.toFixed(2);
+            $("#velY").innerText = player.velY.toFixed(2);
+        }
+
+        upPressed = downPressed = leftPressed = rightPressed = false;
+        document.addEventListener("keydown", keyDownHandler, false);
+        document.addEventListener("keyup", keyUpHandler, false);
+        frame();
+
+    </script>
+</body>
+
+</html>
