@@ -13,6 +13,7 @@ const Vec3 = {
     neg: (v) => [-v[0], -v[1], -v[2]],
     add: (v1, v2) => [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]],
     sub: (v1, v2) => [v1[0] - v2[0], v1[1] - v2[1], v1[2] - v2[2]],
+    scale: (v, s) => [v[0] * s, v[1] * s, v[2] * s],
     dot: (v1, v2) => v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2],
     length: (v) => Math.sqrt(Vec3.dot(v, v)),
     normalize: (v) => {

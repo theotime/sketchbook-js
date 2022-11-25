@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>
-        WebGL UV cube
+        WebGL 3D engine
     </title>
     <style>
         body {
@@ -20,77 +20,61 @@
         <p></p>
     </div>
     <script src="matrix.js"></script>
-    <script>
-        // data from: https://learnopengl.com/Getting-started/Camera
-        // culling cannot be enabled, because triangles seems to be defined with different winding order
-        var primitiveCubeUv = [
-            -0.5, -0.5, -0.5, 0.0, 0.0,
-            0.5, -0.5, -0.5, 1.0, 0.0,
-            0.5, 0.5, -0.5, 1.0, 1.0,
-            0.5, 0.5, -0.5, 1.0, 1.0,
-            -0.5, 0.5, -0.5, 0.0, 1.0,
-            -0.5, -0.5, -0.5, 0.0, 0.0,
-
-            -0.5, -0.5, 0.5, 0.0, 0.0,
-            0.5, -0.5, 0.5, 1.0, 0.0,
-            0.5, 0.5, 0.5, 1.0, 1.0,
-            0.5, 0.5, 0.5, 1.0, 1.0,
-            -0.5, 0.5, 0.5, 0.0, 1.0,
-            -0.5, -0.5, 0.5, 0.0, 0.0,
-
-            -0.5, 0.5, 0.5, 1.0, 0.0,
-            -0.5, 0.5, -0.5, 1.0, 1.0,
-            -0.5, -0.5, -0.5, 0.0, 1.0,
-            -0.5, -0.5, -0.5, 0.0, 1.0,
-            -0.5, -0.5, 0.5, 0.0, 0.0,
-            -0.5, 0.5, 0.5, 1.0, 0.0,
-
-            0.5, 0.5, 0.5, 1.0, 0.0,
-            0.5, 0.5, -0.5, 1.0, 1.0,
-            0.5, -0.5, -0.5, 0.0, 1.0,
-            0.5, -0.5, -0.5, 0.0, 1.0,
-            0.5, -0.5, 0.5, 0.0, 0.0,
-            0.5, 0.5, 0.5, 1.0, 0.0,
-
-            -0.5, -0.5, -0.5, 0.0, 1.0,
-            0.5, -0.5, -0.5, 1.0, 1.0,
-            0.5, -0.5, 0.5, 1.0, 0.0,
-            0.5, -0.5, 0.5, 1.0, 0.0,
-            -0.5, -0.5, 0.5, 0.0, 0.0,
-            -0.5, -0.5, -0.5, 0.0, 1.0,
-
-            -0.5, 0.5, -0.5, 0.0, 1.0,
-            0.5, 0.5, -0.5, 1.0, 1.0,
-            0.5, 0.5, 0.5, 1.0, 0.0,
-            0.5, 0.5, 0.5, 1.0, 0.0,
-            -0.5, 0.5, 0.5, 0.0, 0.0,
-            -0.5, 0.5, -0.5, 0.0, 1.0
-        ];
-    </script>
+    <script src="geoprimitives.js"></script>
     <script id="default-vs" type="x-shader/x-vertex">
         precision mediump float;
         attribute vec3 aVertexPosition;
-        attribute vec2 aUV;
+        attribute vec3 aNormal;
+        //attribute vec2 aUV;
 
-        varying vec2 uv;
+        //varying vec2 uv;
+        varying vec3 normal;
 
         //uniform float time;
-        uniform mat4 MVP;
+        uniform mat4 model;
+        uniform mat4 view;
+        uniform mat4 projection;
     
         void main(void) {
-            vec4 p = MVP * vec4(aVertexPosition, 1.0);
+            vec4 p = projection * view * model * vec4(aVertexPosition, 1.0);
             gl_Position = vec4(p);
-            uv = aUV;
+            //uv = aUV;
+
+            // XXX need to inverse then transpose to handle properly scaling in the model matrix
+            normal = mat3(model) * aNormal;
         }
     </script>
     <script id="default-fs" type="x-shader/x-fragment">
-        varying vec2 uv;
+        //varying vec2 uv;
+        varying vec3 normal;
+
+        //uniform sampler2D uTexture;
+        
+        vec3 black = vec3(.133, .137, .137);
+        vec3 white = vec3(.941, .965, .941);
 
         void main(void) {
-            gl_FragColor = vec4(uv, 0.0, 1.0);
+            //gl_FragColor = texture2D(uTexture, uv);
+            //gl_FragColor = vec4(uv, 0, 1);
+            
+            //vec3 color = normal * .5 + .5;
+            
+            vec3 light = normalize(vec3(1));
+            float dotNL = dot(light, normalize(normal));
+            dotNL = .5*dotNL+.5;
+            vec3 color = vec3(.05) + white * dotNL;
+            color = clamp(color, vec3(0), vec3(1));
+            color = sqrt(color);
+            
+            gl_FragColor = vec4(color, 1);
         }
     </script>
     <script>
+
+        /*
+            Implementation inspired from: https://learnopengl.com/Getting-started/Camera
+        */
+
         const $ = (e) => document.querySelector(e);
         const $$ = (e) => document.querySelectorAll(e);
 
@@ -111,8 +95,20 @@
         canvas.style.height = `${height}px`;
 
 
+        // Inputs
+        let upPressed, downPressed, leftPressed, rightPressed, spacePressed;
+        let keyboardEnum = { left: 37, up: 38, right: 39, down: 40, space: 32 };
+
+
         // Parameters
         var fps = 60.0;
+
+        var cameraPos = [0, 0, 3];
+        var cameraFront = Vec3.back;
+        var cameraUp = Vec3.up;
+        var cameraSpeed = 0.1;
+        var sensibility = 0.1;
+        var yaw = -90.0, pitch = 0;
 
         var fov = 45.0;
         var aspect = width / height;
@@ -130,6 +126,103 @@
 
         var defaultMaterial = null;
 
+
+        let radians = x => x * (Math.PI / 180);
+
+
+
+        /*
+            Inputs System.
+        */
+
+        function initInputs() {
+            upPressed = downPressed = leftPressed = rightPressed = spacePressed = false;
+            document.addEventListener("keydown", keyDownHandler, false);
+            document.addEventListener("keyup", keyUpHandler, false);
+
+            canvas.onclick = function () {
+                canvas.requestPointerLock();
+            }
+
+            document.addEventListener("pointerlockchange", function () {
+                if (document.pointerLockElement == canvas) {
+                    console.log("pointer locked");
+                    document.addEventListener("mousemove", cursorHandler, false);
+                } else {
+                    console.log("pointer unlocked");
+                    document.removeEventListener("mousemove", cursorHandler, false);
+                }
+            }, false);
+        }
+
+        function cursorHandler(event) {
+            yaw += event.movementX * sensibility;
+            pitch += event.movementY * sensibility;
+
+            pitch = Math.min(pitch, 89);
+            pitch = Math.max(pitch, -89);
+
+            let inversedPitch = pitch * -1;
+
+            let direction = [0, 0, 0];
+            direction[0] = Math.cos(radians(yaw)) * Math.cos(radians(inversedPitch));
+            direction[1] = Math.sin(radians(inversedPitch));
+            direction[2] = Math.sin(radians(yaw)) * Math.cos(radians(inversedPitch));
+            cameraFront = Vec3.normalize(direction);
+
+            //console.log("yaw: " + yaw + " ; pitch: " + inversedPitch);
+        }
+
+        const keyDownHandler = event => keyHandler(event, true);
+        const keyUpHandler = event => keyHandler(event, false);
+        function keyHandler(event, state) {
+            if (event.keyCode == keyboardEnum.right) {
+                rightPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.left) {
+                leftPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.down) {
+                downPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.up) {
+                upPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.space) {
+                spacePressed = state;
+            }
+        }
+
+        function handleInputs() {
+
+            let forward = Vec3.scale(cameraFront, cameraSpeed);
+
+            let right = Vec3.normalize(Vec3.cross(cameraFront, cameraUp));
+            right = Vec3.scale(right, cameraSpeed);
+
+            let up = Vec3.scale(cameraUp, cameraSpeed);
+
+            if (upPressed) {
+                cameraPos = Vec3.add(cameraPos, forward);
+            } else if (downPressed) {
+                cameraPos = Vec3.sub(cameraPos, forward);
+            }
+
+            if (rightPressed) {
+                cameraPos = Vec3.add(cameraPos, right);
+            } else if (leftPressed) {
+                cameraPos = Vec3.sub(cameraPos, right);
+            }
+
+            if (spacePressed) {
+                cameraPos = Vec3.add(cameraPos, up)
+            }
+        }
+
+
+        /*
+            Rendering System.
+        */
 
         function getShader(name) {
             let sourceElement = document.getElementById(name);
@@ -173,19 +266,31 @@
             return program;
         }
 
-        function init() {
+        function initWebgl() {
             gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-            gl.clearColor(.1, .12, .1, 1.0);
+            gl.clearColor(0.133, 0.137, 0.137, 1.0);
             gl.enable(gl.DEPTH_TEST);
             //gl.enable(gl.CULL_FACE);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
             buffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(primitiveCubeUv), gl.STATIC_DRAW);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(primitiveCubeNormal), gl.STATIC_DRAW);
 
             defaultMaterial = compileProgram("default");
             loadCurrentMaterial();
+
+            /*var texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 255, 255]));
+
+            var image = new Image();
+            image.src = "assets2/container.jpg";
+            image.addEventListener("load", function () {
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+                gl.generateMipmap(gl.TEXTURE_2D);
+            });*/
 
             perspectiveMatrix = new Mat4x4();
             perspectiveMatrix.perspective(fov, aspect, near, far);
@@ -200,11 +305,16 @@
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
             vertexPositionAttribute = gl.getAttribLocation(mat, "aVertexPosition");
             gl.enableVertexAttribArray(vertexPositionAttribute);
-            gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 5 * Float32Array.BYTES_PER_ELEMENT, 0);
+            gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 0);
 
-            vertexColorAttribute = gl.getAttribLocation(mat, "aUV");
+            vertexColorAttribute = gl.getAttribLocation(mat, "aNormal");
+            gl.enableVertexAttribArray(vertexColorAttribute);
+            gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+
+            /*vertexColorAttribute = gl.getAttribLocation(mat, "aUV");
             gl.enableVertexAttribArray(vertexColorAttribute);
             gl.vertexAttribPointer(vertexColorAttribute, 2, gl.FLOAT, false, 5 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+            */
         }
 
         function draw() {
@@ -217,31 +327,68 @@
             let mat = defaultMaterial;
 
             let view = new Mat4x4();
-            let radius = 3;
+            /*
+            let radius = 15;
             let x = radius * Math.cos(elapsedTime);
             let z = radius * Math.sin(elapsedTime);
             view.lookAt([x, 1.5, z], Vec3.zero, Vec3.up);
-            let mvp = perspectiveMatrix.multiplyMat4x4(view);
+            */
+            view.lookAt(cameraPos, Vec3.add(cameraPos, cameraFront), Vec3.up);
 
             //gl.uniform1f(gl.getUniformLocation(mat, "time"), elapsedTime);
-            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "MVP"), false, mvp.array());
+            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "view"), false, view.array());
+            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "projection"), false, perspectiveMatrix.array());
+            //gl.uniform1i(gl.getUniformLocation(mat, "uTexture"), 0);
+
+
+            let cubePositions = [
+                0.0, 0.0, 0.0,
+                2.0, 5.0, -15.0,
+                -1.5, -2.2, -2.5,
+                -3.8, -2.0, -12.3,
+                2.4, -0.4, -3.5,
+                -1.7, 3.0, -7.5,
+                1.3, -2.0, -2.5,
+                1.5, 2.0, -2.5,
+                1.5, 0.2, -1.5,
+                -1.3, 1.0, -1.5
+            ];
 
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
-            gl.drawArrays(gl.TRIANGLES, 0, 36);
+            let trans = new Mat4x4();
+            let rot = new Mat4x4();
+            for (let i = 0; i < 10; i++) {
+                trans.fromTranslate(cubePositions[i * 3], cubePositions[i * 3 + 1], cubePositions[i * 3 + 2]);
+                rot.fromAngleAxis(radians(20.0 * i), Vec3.normalize([1, 0.3, 0.5]));
+                let m = trans.multiplyMat4x4(rot);
+
+                gl.uniformMatrix4fv(gl.getUniformLocation(mat, "model"), false, m.array());
+
+                gl.drawArrays(gl.TRIANGLES, 0, 36);
+            }
+
+        }
+
+        function update() {
+            handleInputs();
         }
 
         function frame() {
             if (!paused) {
                 frames++;
                 $("#frames").innerHTML = (frames / fps).toFixed(2);
+
+                update();
                 draw();
             }
 
             window.requestAnimationFrame(frame);
         }
 
-        init();
+
+        initInputs();
+        initWebgl();
         window.requestAnimationFrame(frame);
 
     </script>
