@@ -35,14 +35,45 @@
         var pictures = [];
         var undo = [];
 
+        const MODE_AABB = 0;
+        const MODE_AXIS = 1;
+        const mode = MODE_AABB;
+
         let yoffset = width / 2;
 
-        let aabb1 = [
-            { x: width * .25, y: height * .25 },
-            { x: width * .75, y: height * .75 }
-        ];
+        let randomBorderSize = 50;
+        let numRandomPoints = 5;
+        let randomPoints = [];
+        let randomAABB = [];
 
         const equalPoints = (a, b) => a.x == b.x && a.y == b.y;
+
+        function generateRandomAABB(points, num, bordersize, aabb) {
+            const random = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
+
+            for (let i = 0; i < numRandomPoints; i++) {
+                randomPoints.push(
+                    {
+                        x: random(bordersize, width - bordersize),
+                        y: random(bordersize, height - bordersize)
+                    }
+                );
+            }
+
+            let min = { x: randomPoints[0].x, y: randomPoints[0].y };
+            let max = { x: randomPoints[0].x, y: randomPoints[0].y };
+
+            for (let i = 1; i < numRandomPoints; i++) {
+                min.x = Math.min(min.x, randomPoints[i].x);
+                min.y = Math.min(min.y, randomPoints[i].y);
+                max.x = Math.max(max.x, randomPoints[i].x);
+                max.y = Math.max(max.y, randomPoints[i].y);
+            }
+
+            randomAABB[0] = min;
+            randomAABB[1] = max;
+
+        }
 
         function fillCircle(px, py, r) {
             ctx.beginPath();
@@ -58,7 +89,11 @@
         }
 
         function drawAABB(aabb) {
-            ctx.strokeRect(aabb[0].x, aabb[0].y, aabb[1].x- aabb[0].x, aabb[1].y - aabb[0].y);
+            ctx.strokeRect(aabb[0].x, aabb[0].y, aabb[1].x - aabb[0].x, aabb[1].y - aabb[0].y);
+        }
+
+        function drawPoints(points) {
+            points.forEach(p => fillCircle(p.x, p.y, 2));
         }
 
         // t = (dist - dot(ro, n)) / dot(rd, n)
@@ -66,14 +101,44 @@
         function intersectYAxis(ro, rd, dist) {
             let t = Infinity;
             // dot(rd, n) = rd.x*nx + rd.y*ny = rd.x
-            if (rd.x == 0) {
-                return t;
+            if (rd.x != 0) {
+                // dot(ro, n) = ro.x*nx + ro.y*ny = ro.x
+                t = (dist - ro.x) / rd.x;
             }
 
-            // dot(ro, n) = ro.x*nx + ro.y*ny = ro.x
-            t = (dist - ro.x) / rd.x;
-
             return t;
+        }
+
+        // ref: https://tavianator.com/2011/ray_box.html
+        function intersectAABB(ro, rd, aabb) {
+            let tmin = -Infinity, tmax = Infinity;
+
+            if (rd.x != 0) {
+                let tx0 = (aabb[0].x - ro.x) / rd.x;
+                let tx1 = (aabb[1].x - ro.x) / rd.x;
+
+                tmin = Math.max(tmin, Math.min(tx0, tx1));// get the nearest intersection along the ray
+                tmax = Math.min(tmax, Math.max(tx0, tx1));// get the farest intersection along the ray
+            }
+
+            if (rd.y != 0) {
+                let ty0 = (aabb[0].y - ro.y) / rd.y;
+                let ty1 = (aabb[1].y - ro.y) / rd.y;
+
+                // same operation as before
+                // get the nearest intersection along the ray,
+                // then compare to prev tmin (get farest)
+                tmin = Math.max(tmin, Math.min(ty0, ty1));
+                // get the farest intersection along the ray,
+                // then compare to prev tmax (get the nearest)
+                tmax = Math.min(tmax, Math.max(ty0, ty1));
+            }
+
+            if (tmax < tmin) {
+                return [-Infinity, Infinity];
+            }
+
+            return [tmin, tmax];
         }
 
         function drawRay(line) {
@@ -100,10 +165,20 @@
             let len = Math.sqrt(dx * dx + dy * dy);
             let ro = line[0];
             let rd = { x: dx / len, y: dy / len };
-            let t = intersectYAxis(ro, rd, yoffset);
-            if (t <= screenDiag) {
-                ctx.fillStyle = "red";
-                fillCircle(ro.x + t * rd.x, ro.y + t * rd.y, 2);
+
+            if (mode == MODE_AABB) {
+                let [tmin, tmax] = intersectAABB(ro, rd, randomAABB);
+                if (Math.abs(tmin) <= screenDiag && Math.abs(tmax) <= screenDiag) {
+                    ctx.fillStyle = "red";
+                    fillCircle(ro.x + tmin * rd.x, ro.y + tmin * rd.y, 2);
+                    fillCircle(ro.x + tmax * rd.x, ro.y + tmax * rd.y, 2);
+                }
+            } else {
+                let t = intersectYAxis(ro, rd, yoffset);
+                if (Math.abs(t) <= screenDiag) {
+                    ctx.fillStyle = "red";
+                    fillCircle(ro.x + t * rd.x, ro.y + t * rd.y, 2);
+                }
             }
         }
 
@@ -123,8 +198,14 @@
 
             // draw Y axis, with offset
             ctx.strokeStyle = "tomato";
-            drawLine([{ x: yoffset, y: 0 }, { x: yoffset, y: height }]);
-            //drawAABB(aabb1);
+            if (mode == MODE_AABB) {
+                drawAABB(randomAABB);
+            } else {
+                drawLine([{ x: yoffset, y: 0 }, { x: yoffset, y: height }]);
+            }
+
+            ctx.fillStyle = "grey";
+            drawPoints(randomPoints);
         }
 
         canvas.addEventListener("pointerdown", (e) => {
@@ -167,6 +248,8 @@
             updateCanvas();
         });
 
+
+        generateRandomAABB(randomPoints, numRandomPoints, randomBorderSize, randomAABB);
         updateCanvas();
 
     </script>
