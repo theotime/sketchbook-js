@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Raycast AABB
+    </title>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <br>
+    <input id="undo" type="button" value="undo">
+    <input id="redo" type="button" value="redo">
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+        let screenDiag = Math.sqrt(width * width + height * height);
+
+        var pointerPosition = null;
+        var pointerdownPosition = null;
+        var pictures = [];
+        var undo = [];
+
+        let yoffset = width / 2;
+
+        let aabb1 = [
+            { x: width * .25, y: height * .25 },
+            { x: width * .75, y: height * .75 }
+        ];
+
+        const equalPoints = (a, b) => a.x == b.x && a.y == b.y;
+
+        function fillCircle(px, py, r) {
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawLine(line) {
+            ctx.beginPath();
+            ctx.moveTo(line[0].x, line[0].y);
+            ctx.lineTo(line[1].x, line[1].y);
+            ctx.stroke();
+        }
+
+        function drawAABB(aabb) {
+            ctx.strokeRect(aabb[0].x, aabb[0].y, aabb[1].x- aabb[0].x, aabb[1].y - aabb[0].y);
+        }
+
+        // t = (dist - dot(ro, n)) / dot(rd, n)
+        // n = (1, 0)
+        function intersectYAxis(ro, rd, dist) {
+            let t = Infinity;
+            // dot(rd, n) = rd.x*nx + rd.y*ny = rd.x
+            if (rd.x == 0) {
+                return t;
+            }
+
+            // dot(ro, n) = ro.x*nx + ro.y*ny = ro.x
+            t = (dist - ro.x) / rd.x;
+
+            return t;
+        }
+
+        function drawRay(line) {
+            let dx = line[1].x - line[0].x;
+            let dy = line[1].y - line[0].y;
+
+            // y = a * x + b
+            let a;
+            if (dx == 0) {
+                a = dy;
+            } else {
+                a = dy / dx;
+            }
+            let b = line[0].y - line[0].x * a;
+
+            let ray = [
+                { x: 0, y: b },
+                { x: width, y: a * width + b }
+            ];
+
+            ctx.strokeStyle = "orange";
+            drawLine(ray);
+
+            let len = Math.sqrt(dx * dx + dy * dy);
+            let ro = line[0];
+            let rd = { x: dx / len, y: dy / len };
+            let t = intersectYAxis(ro, rd, yoffset);
+            if (t <= screenDiag) {
+                ctx.fillStyle = "red";
+                fillCircle(ro.x + t * rd.x, ro.y + t * rd.y, 2);
+            }
+        }
+
+        function updateCanvas() {
+            ctx.clearRect(0, 0, width, height);
+
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+
+            pictures.forEach(v => drawRay(v));
+
+            // draw current line
+            if (pointerdownPosition) {
+                ctx.strokeStyle = "orange";
+                drawLine([pointerdownPosition, pointerPosition]);
+            }
+
+            // draw Y axis, with offset
+            ctx.strokeStyle = "tomato";
+            drawLine([{ x: yoffset, y: 0 }, { x: yoffset, y: height }]);
+            //drawAABB(aabb1);
+        }
+
+        canvas.addEventListener("pointerdown", (e) => {
+            pointerdownPosition = { ...pointerPosition };
+        });
+
+        canvas.addEventListener("pointerup", (e) => {
+            if (!equalPoints(pointerdownPosition, pointerPosition)) {
+                pictures.push([{ ...pointerdownPosition }, { ...pointerPosition }]);
+            }
+
+            pointerdownPosition = null;
+            updateCanvas();
+        });
+
+        canvas.addEventListener("pointermove", (e) => {
+            let r = canvas.getBoundingClientRect();
+            pointerPosition = { x: e.clientX - r.left, y: e.clientY - r.top };
+
+            if (pointerdownPosition) {
+                updateCanvas();
+            }
+        });
+
+        $("#undo").addEventListener("click", e => {
+            let lastItem = pictures.pop();
+            if (lastItem !== undefined) {
+                undo.push(lastItem);
+            }
+
+            updateCanvas();
+        });
+
+        $("#redo").addEventListener("click", e => {
+            let lastUndo = undo.pop();
+            if (lastUndo !== undefined) {
+                pictures.push(lastUndo);
+            }
+
+            updateCanvas();
+        });
+
+        updateCanvas();
+
+    </script>
+</body>
+
+</html>
