@@ -64,6 +64,10 @@ class Mat4x4 {
         return this.copy().transpose();
     }
 
+    getInverse(flag = false) {
+        return this.copy().inverse(flag);
+    }
+
     // https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Matrix_math_for_the_web
     // converted to column-major
     multiplyVec4(v) {
@@ -111,6 +115,96 @@ class Mat4x4 {
         return this;
     }
 
+    /*
+        Inverse of a 3x3 matrix (because it's simpler and enough for what we need now).
+
+        XXX TODO: Handle affine transformations for Mat4x4 before the general case.
+
+        Cramer's rule - Adjugate matrix
+        https://gamemath.com/book/matrixmore.html
+        https://en.wikipedia.org/wiki/Adjugate_matrix
+
+        A * adj(A) = det(A) * I
+
+        mat4 to mat3
+        m0 m3 m6      m0 m4 m8  m12
+        m1 m4 m7  <-  m1 m5 m9  m13
+        m2 m5 m8      m2 m6 m10 m14
+                      m3 m7 m11 m15
+
+        m0 m3 m6   +  -  +
+        m1 m4 m7   -  +  -
+        m2 m5 m8   +  -  +
+
+        Adjugate matrix is the transpose of the cofactor matrix.
+        Cofactors:
+        c0 = (+) m4m8 - m7m5
+        c6 = (+) m1m5 - m4m2
+        c2 = (+) m3m7 - m6m4
+        c8 = (+) m0m4 - m3m1
+        c4 = (+) m0m8 - m6m2
+        c3 = (-) m1m8 - m7m2
+        c7 = (-) m0m5 - m3m2
+        c5 = (-) m0m7 - m6m1
+        c1 = (-) m3m8 - m6m5
+
+        det(A) = Sum [m(i,j) * c(i,j)]
+        = m0 * c0 + m3 * c3 + m6 * c6
+    */
+    static BYPASS_EXCEPTION = true;
+    inverse(bypassException = false) {
+        // will throw an exception if matrix is not a 3x3 matrix into a 4x4 matrix.
+        let is3x3matrix = false;
+        if (this.value[3] == 0 && this.value[7] == 0 && this.value[11] == 0 &&
+            this.value[12] == 0 && this.value[13] == 0 && this.value[14] == 0 &&
+            this.value[15] == 1) {
+            is3x3matrix = true;
+        }
+
+        if (!is3x3matrix && bypassException) {
+            console.warn("Notice: Mat4x4::inverse() not fully implemented, will reset the 4th column & row with (0,0,0,1)");
+        }
+        if (!is3x3matrix && !bypassException) {
+            console.warn(this.toString(2, "console"));
+            throw "Error: Mat4x4::inverse() not fully implemented, 4th column & row must be (0,0,0,1)"
+        }
+
+        // convert to mat3 and not directly assigning into the mat4,
+        // so we can refactor this function into Mat3x3.inverse() later when we'll fully implement Mat4x4.inverse().
+        let m = [
+            this.value[0], this.value[1], this.value[2], // column 1
+            this.value[4], this.value[5], this.value[6], // column 2
+            this.value[8], this.value[9], this.value[10] // column 3
+        ];
+
+        // compute cofactors
+        let c = [];
+        c[0] = m[4] * m[8] - m[7] * m[5];
+        c[1] = m[6] * m[5] - m[3] * m[8];
+        c[2] = m[3] * m[7] - m[6] * m[4];
+        c[3] = m[7] * m[2] - m[1] * m[8];
+        c[4] = m[0] * m[8] - m[7] * m[2];
+        c[5] = m[6] * m[1] - m[0] * m[7];
+        c[6] = m[1] * m[5] - m[4] * m[2];
+        c[7] = m[3] * m[2] - m[0] * m[5];
+        c[8] = m[0] * m[4] - m[3] * m[1];
+
+        // compute inverse determinant
+        let invDet = 1.0 / (m[0] * c[0] + m[3] * c[3] + m[6] * c[6]);
+
+        // convert back to mat4, transpose to get adjugate matrix & compute the inverse in one pass
+        // A^-1 = adj(A) / det(A)
+        this.value = [
+            c[0] * invDet, c[1] * invDet, c[2] * invDet, 0,
+            c[3] * invDet, c[4] * invDet, c[5] * invDet, 0,
+            c[6] * invDet, c[7] * invDet, c[8] * invDet, 0,
+            0, 0, 0, 1,
+        ];
+        this.transpose(); // same as doing before the division
+
+        return this;
+    }
+
     translate(tx, ty, tz) {
         let m = new Mat4x4();
         this.value = m.fromTranslate(tx, ty, tz).multiplyMat4x4(this).get();
@@ -125,7 +219,7 @@ class Mat4x4 {
 
     scale(sx, sy, sz) {
         let m = new Mat4x4();
-        this.value = m.fromTranslate(sx, sy, sz).multiplyMat4x4(this).get();
+        this.value = m.fromScale(sx, sy, sz).multiplyMat4x4(this).get();
         return this;
     }
 
@@ -254,35 +348,42 @@ class Mat4x4 {
         return this;
     }
 
-    toString(rounding = 2) {
+    toString(rounding = 2, formatted = "html") {
         let string = "";
 
         let m = this.copy();
         m.round(rounding);
 
+        let endl = " ";
+        if (formatted == "html") {
+            endl = "<br>";
+        } else if (formatted == "console") {
+            endl = "\n";
+        }
+
         // first row
         string += m.value[0].toFixed(rounding) + " ";
         string += m.value[4].toFixed(rounding) + " ";
         string += m.value[8].toFixed(rounding) + " ";
-        string += m.value[12].toFixed(rounding) + "<br>";
+        string += m.value[12].toFixed(rounding) + endl;
 
         // second row
         string += m.value[1].toFixed(rounding) + " ";
         string += m.value[5].toFixed(rounding) + " ";
         string += m.value[9].toFixed(rounding) + " ";
-        string += m.value[13].toFixed(rounding) + "<br>";
+        string += m.value[13].toFixed(rounding) + endl;
 
         // third row
         string += m.value[2].toFixed(rounding) + " ";
         string += m.value[6].toFixed(rounding) + " ";
         string += m.value[10].toFixed(rounding) + " ";
-        string += m.value[14].toFixed(rounding) + "<br>";
+        string += m.value[14].toFixed(rounding) + endl;
 
         // fourth row
         string += m.value[3].toFixed(rounding) + " ";
         string += m.value[7].toFixed(rounding) + " ";
         string += m.value[11].toFixed(rounding) + " ";
-        string += m.value[15].toFixed(rounding) + "<br>";
+        string += m.value[15].toFixed(rounding) + endl;
 
         return string;
     }

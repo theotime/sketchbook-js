@@ -35,14 +35,14 @@
         uniform mat4 model;
         uniform mat4 view;
         uniform mat4 projection;
+
+        uniform mat4 invModel; // only for normals, it's a mat3 in a mat4 container
     
         void main(void) {
             vec4 p = projection * view * model * vec4(aVertexPosition, 1.0);
             gl_Position = vec4(p);
             //uv = aUV;
-
-            // XXX need to inverse then transpose to handle properly scaling in the model matrix
-            normal = mat3(model) * aNormal;
+            normal = mat3(invModel) * aNormal;
         }
     </script>
     <script id="default-fs" type="x-shader/x-fragment">
@@ -360,11 +360,13 @@
                     cubePositions[i * 3 + 2]
                 );
 
+                let invModel = m.getInverse(Mat4x4.BYPASS_EXCEPTION).getTranspose();
+
                 gl.uniformMatrix4fv(gl.getUniformLocation(mat, "model"), false, m.get());
+                gl.uniformMatrix4fv(gl.getUniformLocation(mat, "invModel"), false, invModel.get());
 
                 gl.drawArrays(gl.TRIANGLES, 0, 36);
             }
-
         }
 
         function update() {

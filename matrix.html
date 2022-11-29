@@ -89,6 +89,9 @@
         let mresult2 = rx30.multiplyMat4x4(s1); // r * s
         mresult2 = t1.multiplyMat4x4(mresult2); // t * (r * s)
 
+        let mrestult2_inv = new Mat4x4(); // ignoring translate
+        mrestult2_inv = rx30.getTranspose().scale(0.5, 1, 2);// (r * s)^-1 = s^-1 * r^-1
+
         let view = new Mat4x4();
         view.lookAt([0, 0, 3], Vec3.zero, Vec3.up);
 
@@ -134,6 +137,17 @@
         output(view.toString(0));
         output(persp.toString(3));
         //output(persp.transpose().toString(3));
+        output("inverse & transpose");
+        output("--------------------");
+        output();
+        //output(persp.inverse().toString());// throw an exception
+        output(t1.getInverse(Mat4x4.BYPASS_EXCEPTION).toString()); // erase the the last column, because not fully implemented
+        output(rx30.getInverse().getTranspose().almostEqual(rx30, Number.EPSILON));
+        output(rx30.getInverse().toString());
+        output(s1.getInverse().toString());
+        output(mresult2.getInverse(Mat4x4.BYPASS_EXCEPTION).almostEqual(mrestult2_inv, Number.EPSILON));
+        //output(mrestult2_inv.toString());
+        output(mresult2.getInverse(Mat4x4.BYPASS_EXCEPTION).toString());
 
 
         // vectors
