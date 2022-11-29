@@ -42,7 +42,7 @@
         //let err = new Mat4x4([1, 2, 3, 4, 5, "abcde", 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
         //let err = new Mat4x4([1, 2, 3, 4]);
 
-        let m1 = new Mat4x4();
+        let identity = new Mat4x4();
         let m2 = new Mat4x4([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 
 
@@ -100,12 +100,13 @@
         output("init");
         output("----");
         output();
-        output(m1.toString(0));
+        output(identity.toString(0));
         output(m2.toString(0));
         output("quaternions");
         output("-----------");
         output();
         output(rx30.toString());
+        output(rx30.getTranspose().toString());
         output(rx45.toString());
         output(rx90.toString(0));
         output("trs");
@@ -122,6 +123,8 @@
         output("matrix multiplication");
         output("---------------------");
         output();
+        output(mresult1.toString(8) == identity.toString(8));
+        output(mresult1.almostEqual(identity, Number.EPSILON * 5.0));
         output(mresult1.toString(0));
         output(mresult2.toString(3));
         output();
@@ -130,6 +133,7 @@
         output();
         output(view.toString(0));
         output(persp.toString(3));
+        //output(persp.transpose().toString(3));
 
 
         // vectors

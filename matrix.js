@@ -52,8 +52,16 @@ class Mat4x4 {
         this.value = params;
     }
 
-    array() {
-        return this.value;
+    get() {
+        return [...this.value];
+    }
+
+    copy() {
+        return new Mat4x4(this.get());
+    }
+
+    getTranspose() {
+        return this.copy().transpose();
     }
 
     // https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Matrix_math_for_the_web
@@ -68,7 +76,7 @@ class Mat4x4 {
 
     multiplyMat4x4(matrix) {
 
-        let m = matrix.array();
+        let m = matrix.get();
 
         let column0 = [m[0], m[1], m[2], m[3]];
         let column1 = [m[4], m[5], m[6], m[7]];
@@ -86,7 +94,44 @@ class Mat4x4 {
             result2[0], result2[1], result2[2], result2[3],
             result3[0], result3[1], result3[2], result3[3]
         ]);
+
         return result;
+    }
+
+    transpose() {
+        const swap = (a, m, n) => [a[m], a[n]] = [a[n], a[m]];
+
+        swap(this.value, 1, 4);
+        swap(this.value, 2, 8);
+        swap(this.value, 3, 12);
+        swap(this.value, 6, 9);
+        swap(this.value, 7, 13);
+        swap(this.value, 11, 14);
+
+        return this;
+    }
+
+    translate(tx, ty, tz) {
+        let m = new Mat4x4();
+        this.value = m.fromTranslate(tx, ty, tz).multiplyMat4x4(this).get();
+        return this;
+    }
+
+    rotate(angle, axis) {
+        let m = new Mat4x4();
+        this.value = m.fromAngleAxis(angle, axis).multiplyMat4x4(this).get();
+        return this;
+    }
+
+    scale(sx, sy, sz) {
+        let m = new Mat4x4();
+        this.value = m.fromTranslate(sx, sy, sz).multiplyMat4x4(this).get();
+        return this;
+    }
+
+    fromIdentity() {
+        this.value = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+        return this;
     }
 
     // http://www.songho.ca/opengl/gl_quaternion.html
@@ -103,12 +148,16 @@ class Mat4x4 {
             2 * x * z + 2 * w * y, 2 * y * z - 2 * w * x, 1 - 2 * x * x - 2 * y * y, 0, // column 3
             0, 0, 0, 1
         ];
+
+        return this;
     }
 
     fromAngleAxis(angle, axis) {
         let cos = Math.cos(angle / 2.0);
         let sin = Math.sin(angle / 2.0);
         this.fromQuaternion(axis[0] * sin, axis[1] * sin, axis[2] * sin, cos);
+
+        return this;
     }
 
     // 1 0 0 tx
@@ -122,6 +171,8 @@ class Mat4x4 {
             0, 0, 1, 0,
             tx, ty, tz, 1
         ]; // column-major
+
+        return this;
     }
 
     // http://www.songho.ca/opengl/gl_camera.html
@@ -142,6 +193,7 @@ class Mat4x4 {
             Vec3.dot(l, Vec3.neg(eye)), Vec3.dot(u, Vec3.neg(eye)), Vec3.dot(f, Vec3.neg(eye)), 1
         ]; // column-major
 
+        return this;
     }
 
     // http://www.songho.ca/opengl/gl_projectionmatrix.html
@@ -165,6 +217,8 @@ class Mat4x4 {
             0, 0, A, -1,
             0, 0, B, 0
         ];
+
+        return this;
     }
 
     // sx  0  0   0
@@ -173,34 +227,62 @@ class Mat4x4 {
     // 0  0   0   1
     fromScale(sx, sy, sz) {
         this.value = [sx, 0, 0, 0, 0, sy, 0, 0, 0, 0, sz, 0, 0, 0, 0, 1];
+
+        return this;
+    }
+
+    // XXX will work on a better implementation later
+    almostEqual(matrix, threshold = Number.EPSILON) {
+        for (let i = 0; i < 16; i++) {
+            if (!(Math.abs(this.value[i] - matrix.value[i]) <= threshold)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    round(rounding) {
+        for (let i = 0; i < this.value.length; i++) {
+            this.value[i] = this.value[i].toFixed(rounding);
+            if (this.value[i] == 0) {
+                this.value[i] = 0;
+            } else {
+                this.value[i] = parseFloat(this.value[i]);
+            }
+        }
+
+        return this;
     }
 
     toString(rounding = 2) {
         let string = "";
 
+        let m = this.copy();
+        m.round(rounding);
+
         // first row
-        string += this.value[0].toFixed(rounding) + " ";
-        string += this.value[4].toFixed(rounding) + " ";
-        string += this.value[8].toFixed(rounding) + " ";
-        string += this.value[12].toFixed(rounding) + "<br>";
+        string += m.value[0].toFixed(rounding) + " ";
+        string += m.value[4].toFixed(rounding) + " ";
+        string += m.value[8].toFixed(rounding) + " ";
+        string += m.value[12].toFixed(rounding) + "<br>";
 
         // second row
-        string += this.value[1].toFixed(rounding) + " ";
-        string += this.value[5].toFixed(rounding) + " ";
-        string += this.value[9].toFixed(rounding) + " ";
-        string += this.value[13].toFixed(rounding) + "<br>";
+        string += m.value[1].toFixed(rounding) + " ";
+        string += m.value[5].toFixed(rounding) + " ";
+        string += m.value[9].toFixed(rounding) + " ";
+        string += m.value[13].toFixed(rounding) + "<br>";
 
         // third row
-        string += this.value[2].toFixed(rounding) + " ";
-        string += this.value[6].toFixed(rounding) + " ";
-        string += this.value[10].toFixed(rounding) + " ";
-        string += this.value[14].toFixed(rounding) + "<br>";
+        string += m.value[2].toFixed(rounding) + " ";
+        string += m.value[6].toFixed(rounding) + " ";
+        string += m.value[10].toFixed(rounding) + " ";
+        string += m.value[14].toFixed(rounding) + "<br>";
 
         // fourth row
-        string += this.value[3].toFixed(rounding) + " ";
-        string += this.value[7].toFixed(rounding) + " ";
-        string += this.value[11].toFixed(rounding) + " ";
-        string += this.value[15].toFixed(rounding) + "<br>";
+        string += m.value[3].toFixed(rounding) + " ";
+        string += m.value[7].toFixed(rounding) + " ";
+        string += m.value[11].toFixed(rounding) + " ";
+        string += m.value[15].toFixed(rounding) + "<br>";
 
         return string;
     }

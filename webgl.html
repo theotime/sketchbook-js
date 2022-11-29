@@ -328,8 +328,8 @@
             view.lookAt(cameraPos, Vec3.add(cameraPos, cameraFront), Vec3.up);
 
             //gl.uniform1f(gl.getUniformLocation(mat, "time"), elapsedTime);
-            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "view"), false, view.array());
-            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "projection"), false, perspectiveMatrix.array());
+            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "view"), false, view.get());
+            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "projection"), false, perspectiveMatrix.get());
             //gl.uniform1i(gl.getUniformLocation(mat, "uTexture"), 0);
 
 
@@ -348,14 +348,19 @@
 
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
-            let trans = new Mat4x4();
-            let rot = new Mat4x4();
+            let m = new Mat4x4();
             for (let i = 0; i < 10; i++) {
-                trans.fromTranslate(cubePositions[i * 3], cubePositions[i * 3 + 1], cubePositions[i * 3 + 2]);
-                rot.fromAngleAxis(radians(20.0 * i), Vec3.normalize([1, 0.3, 0.5]));
-                let m = trans.multiplyMat4x4(rot);
+                m.fromIdentity(
+                ).rotate(
+                    radians(20.0 * i),
+                    Vec3.normalize([1, 0.3, 0.5])
+                ).translate(
+                    cubePositions[i * 3],
+                    cubePositions[i * 3 + 1],
+                    cubePositions[i * 3 + 2]
+                );
 
-                gl.uniformMatrix4fv(gl.getUniformLocation(mat, "model"), false, m.array());
+                gl.uniformMatrix4fv(gl.getUniformLocation(mat, "model"), false, m.get());
 
                 gl.drawArrays(gl.TRIANGLES, 0, 36);
             }
