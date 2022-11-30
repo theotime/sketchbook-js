@@ -14,78 +14,23 @@
 </head>
 
 <body>
+    <input type="file" id="input-file" accept=".gltf" />
+    <br><br>
     <div id="output">
         <p></p>
     </div>
     <script>
-        var gltf = {
-            "asset": {
-                "generator": "Khronos glTF Blender I/O v1.5.17",
-                "version": "2.0"
-            },
-            "scene": 0,
-            "scenes": [
-                {
-                    "name": "Scene",
-                    "nodes": [
-                        2,
-                        3,
-                        5
-                    ]
-                }
-            ],
-            "nodes": [
-                {
-                    "name": "Empty.002",
-                    "translation": [
-                        1,
-                        0,
-                        0
-                    ]
-                },
-                {
-                    "children": [
-                        0
-                    ],
-                    "name": "Empty.001",
-                    "translation": [
-                        0,
-                        1,
-                        0
-                    ]
-                },
-                {
-                    "children": [
-                        1
-                    ],
-                    "name": "Empty",
-                    "translation": [
-                        1,
-                        0,
-                        0
-                    ]
-                },
-                {
-                    "name": "Empty.003"
-                },
-                {
-                    "name": "Empty.005"
-                },
-                {
-                    "children": [
-                        4
-                    ],
-                    "name": "Empty.004",
-                    "translation": [
-                        -1,
-                        0,
-                        0
-                    ]
-                }
-            ]
-        };
-    </script>
-    <script>
+
+        /*
+            GLTF loader.
+        */
+
+
+        const MODE_UPLOAD = 1;
+        const MODE_FETCH = 2;
+        const mode = MODE_UPLOAD;
+        
+
         const $ = (e) => document.querySelector(e);
         const $$ = (e) => document.querySelectorAll(e);
 
@@ -93,6 +38,11 @@
             var txt = $("#output p").innerHTML;
             txt += s + "<br>";
             $("#output p").innerHTML = txt;
+        }
+
+        function clearOutput() {
+            var txt = $("#output p").innerHTML;
+            $("#output p").innerHTML = "";
         }
 
         // https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_002_BasicGltfStructure.md
@@ -116,26 +66,38 @@
             output(dump);
         }
 
-        async function printBuffer(gltf, accessorId) {
+        async function printBuffer(gltf, accessorId, name) {
             const bufferViewId = gltf.accessors[accessorId].bufferView;
             const uri = gltf.buffers[gltf.bufferViews[bufferViewId].buffer].uri;
 
-            let res = await fetch(uri);
-            let data = await res.blob();
-            let reader = new FileReader();
-            reader.readAsArrayBuffer(data);
+            try {
+                let res = await fetch(uri);
+                let data = await res.blob();
+                let reader = new FileReader();
+                reader.readAsArrayBuffer(data);
 
-            reader.onload = function () {
-                let buf = reader.result;
+                reader.onload = function () {
+                    let buf = reader.result;
 
-                printNumbers(
-                    buf,
-                    gltf.bufferViews[bufferViewId].byteOffset,
-                    gltf.accessors[accessorId].count,
-                    sizeofType[gltf.accessors[accessorId].type],
-                    bufferTypeComponent[gltf.accessors[accessorId].componentType]
-                );
+                    output();
+                    output();
+                    output("(" + name + ")");
+
+                    printNumbers(
+                        buf,
+                        gltf.bufferViews[bufferViewId].byteOffset,
+                        gltf.accessors[accessorId].count,
+                        sizeofType[gltf.accessors[accessorId].type],
+                        bufferTypeComponent[gltf.accessors[accessorId].componentType]
+                    );
+                }
+            } catch (err) {
+                output();
+                output("--ERROR--");
+                output(err);
+                throw err;
             }
+
         }
 
         function buildTrsMatrix(node) {
@@ -173,10 +135,10 @@
                 const mesh = gltf.meshes[node.mesh];
                 output(mesh.name);
                 mesh.primitives.forEach(async primitive => {
-                    await printBuffer(gltf, primitive.attributes.POSITION);
-                    await printBuffer(gltf, primitive.attributes.NORMAL);
-                    await printBuffer(gltf, primitive.attributes.TEXCOORD_0);
-                    await printBuffer(gltf, primitive.indices);
+                    await printBuffer(gltf, primitive.attributes.POSITION, "position");
+                    await printBuffer(gltf, primitive.attributes.NORMAL, "normal");
+                    await printBuffer(gltf, primitive.attributes.TEXCOORD_0, "uv");
+                    await printBuffer(gltf, primitive.indices, "face");
                 });
             } else {
                 output("no mesh.");
@@ -187,26 +149,73 @@
             }
         }
 
-        //fetch("assets/cube.gltf").then(response => response.json()).then(gltf => {
-        output("scenegraph");
-        output("----------");
-        output();
-        gltf.scenes.forEach(scene => {
-            scene.nodes.forEach(node => {
-                printScenegraph(gltf, node);
+        function dumpGLTF(gltf) {
+            output();
+            output("scenegraph");
+            output("----------");
+            output();
+            gltf.scenes.forEach(scene => {
+                scene.nodes.forEach(node => {
+                    printScenegraph(gltf, node);
+                });
             });
-        });
 
-        output();
-        output("meshes");
-        output("------");
-        output();
-        gltf.scenes.forEach(scene => {
-            scene.nodes.forEach(node => {
-                printMesh(gltf, node);
+            output();
+            output("meshes");
+            output("------");
+            output();
+            gltf.scenes.forEach(scene => {
+                scene.nodes.forEach(node => {
+                    printMesh(gltf, node);
+                });
             });
-        });
-        //}).catch(e => console.log(e));
+
+        }
+
+        function dumpFile(filename, filecontent) {
+            let jsoncontent = JSON.parse(filecontent);
+            if (jsoncontent === null) {
+                throw "Can't parse json.";
+            }
+
+            dumpGLTF(jsoncontent);
+        }
+
+        function processFile(file) {
+            let reader = new FileReader();
+
+            clearOutput();
+
+            reader.onload = function (e) {
+                output("(" + file.name + " loaded)");
+                dumpFile(file.name, e.target.result);
+            }
+
+            reader.onerror = function (e) {
+                output("Can't load " + file.name);
+            }
+
+            reader.readAsText(file);
+        }
+
+        function init() {
+            let fileInput = $("#input-file");
+
+            if (mode == MODE_UPLOAD) {
+                fileInput.addEventListener("change", function () {
+                    processFile(this.files[0]);
+                }, false);
+            } else {
+                fileInput.setAttribute("disabled", "");
+                // for multi-part files gltf (with .bin), so you wont get kicked out from CORS
+                fetch("assets/cube.gltf").then(response => response.json()).then(gltf => {
+                    dumpGLTF(gltf);
+                }).catch(e => console.log(e));
+            }
+        }
+
+
+        init();
 
     </script>
 </body>
