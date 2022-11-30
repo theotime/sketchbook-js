@@ -26,10 +26,16 @@
         */
 
 
+        const MAX_ELEMENT_PRINT = 200;
+
         const MODE_UPLOAD = 1;
         const MODE_FETCH = 2;
         const mode = MODE_UPLOAD;
-        
+
+        const fetch_uri = "DragonAttenuation/glTF/";
+        const fetch_filename = "DragonAttenuation";
+        const fetch_ext = ".gltf";
+
 
         const $ = (e) => document.querySelector(e);
         const $$ = (e) => document.querySelectorAll(e);
@@ -48,27 +54,36 @@
         // https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_002_BasicGltfStructure.md
 
         // constants
-        const GLfloat = 5126;
-        const GLushort = 5123;
-        const bufferTypeComponent = { 5123: Uint16Array, 5126: Float32Array };
+        // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#accessor-data-types
+        const bufferTypeComponent = { 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array };
         const sizeofType = { SCALAR: 1, VEC2: 2, VEC3: 3 };
 
-        function printNumbers(buf, offs, size, cnt, format) {
-            let view = new format(buf, offs, size * cnt);
+        function printNumbers(buf, offs, size, groupnum, format) {
+            let view = new format(buf, offs, size * groupnum);
             let dump = "";
             let count = 0;
-            view.forEach(e => {
-                if (count % cnt == 0)
+            for (const number of view) {
+                if (count % groupnum == 0)
                     dump += "<br>";
-                dump += e.toString() + " ";
+                dump += number.toString() + " ";
                 count++;
-            });
+
+                if (count > MAX_ELEMENT_PRINT * groupnum) {
+                    dump += "<br>[...]<br>(max elements displayed)<br>[...]<br>";
+                    break;
+                }
+            }
+
             output(dump);
         }
 
         async function printBuffer(gltf, accessorId, name) {
             const bufferViewId = gltf.accessors[accessorId].bufferView;
-            const uri = gltf.buffers[gltf.bufferViews[bufferViewId].buffer].uri;
+            let uri = gltf.buffers[gltf.bufferViews[bufferViewId].buffer].uri;
+
+            if (mode == MODE_FETCH) {
+                uri = fetch_uri + uri;
+            }
 
             try {
                 let res = await fetch(uri);
@@ -208,7 +223,7 @@
             } else {
                 fileInput.setAttribute("disabled", "");
                 // for multi-part files gltf (with .bin), so you wont get kicked out from CORS
-                fetch("assets/cube.gltf").then(response => response.json()).then(gltf => {
+                fetch(fetch_uri + fetch_filename + fetch_ext).then(response => response.json()).then(gltf => {
                     dumpGLTF(gltf);
                 }).catch(e => console.log(e));
             }
