@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Animation
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="frames">1</div>
+    <div>q0: <span id="q0">1</span> q1: <span id="q1">1</span> q2: <span id="q2">1</span> q3: <span id="q3">1</span>
+    </div>
+    <div id="output">
+        <p></p>
+    </div>
+    <script>
+
+        /*
+            Simple animation test for GLTF.
+
+            refs:
+            https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_007_Animations.md
+        */
+
+        // XXX TODO: implement slerp
+        // XXX TODO: implement step & cubic-spline interpolation
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        class Animation {
+            constructor() {
+                this.animationInputs = [
+                    0.0416666679084301,
+                    0.5416666865348816,
+                    1.0416666269302368,
+                    1.5416666269302368,
+                    2.0416667461395264
+                ];
+
+                // quaternions
+                // rotation from 0 to 90 degree on z-axis, in 2 seconds
+                this.animationOutputs = [
+                    [0, 0, 0, 1],
+                    [0, 0.1950903981924057, 0, 0.9807853698730469],
+                    [0, 0.3826834559440613, 0, 0.9238795638084412],
+                    [0, 0.5555703043937683, 0, 0.8314696550369263],
+                    [0, 0.7071068286895752, 0, 0.7071067094802856]
+                ];
+
+                this.numKeyframes = this.animationInputs.length;
+                this.animationOffset = this.animationInputs[0];
+                this.animationLen = this.animationInputs[this.numKeyframes - 1] - this.animationOffset;
+
+                this.tsPerKeyframes = this.animationLen / (this.numKeyframes - 1);
+            }
+
+            animate(framesPerSecond, currentFrame) {
+                let ts = currentFrame / framesPerSecond;
+                let currentTime = ts % this.animationLen; // looping on the animation
+
+                let currentKeyframe = Math.floor(currentTime / this.tsPerKeyframes); // assuming keyframes are evenly sampled
+
+                let tmin = this.animationInputs[currentKeyframe] - this.animationOffset;
+                let tmax = this.animationInputs[currentKeyframe + 1] - this.animationOffset;
+
+                let vmin = this.animationOutputs[currentKeyframe];
+                let vmax = this.animationOutputs[currentKeyframe + 1];
+
+                const clamp = (x, min = 0, max = 1) => Math.min(max, Math.max(min, x));
+                const invlerp = (x, min, max) => clamp((x - min) / (max - min));
+                const lerp = (x, min, max) => min + x * (max - min);
+                const lerp4 = (x, min, max) => [
+                    lerp(x, min[0], max[0]),
+                    lerp(x, min[1], max[1]),
+                    lerp(x, min[2], max[2]),
+                    lerp(x, min[3], max[3])
+                ];
+
+                let t = invlerp(currentTime, tmin, tmax);
+                let v = lerp4(t, vmin, vmax);
+
+                /*
+                if (ts <= this.animationLen * 2) {
+                    console.log(currentTime + ":" + currentKeyframe + " interpolates between " + tmin + " and " + tmax); // seconds
+                    console.log(t);
+                    console.log(v);
+                }
+                */
+
+                return v;
+            }
+        }
+
+        const fps = 60;
+        var frames = 0;
+        function frame() {
+            frames++;
+            let [q0, q1, q2, q3] = anim.animate(fps, frames);
+            //m.fromQuaternion(q0, q1, q2, q3);
+
+            $("#frames").innerHTML = frames;
+            $("#q0").innerHTML = q0;
+            $("#q1").innerHTML = q1;
+            $("#q2").innerHTML = q2;
+            $("#q3").innerHTML = q3;
+            //requestAnimationFrame(frame);
+        }
+
+
+        let anim = new Animation();
+        
+        const ms = 1000 / fps;
+        //frame();
+        setInterval(
+            frame,
+            ms
+        );
+
+
+    </script>
+</body>
+
+</html>
