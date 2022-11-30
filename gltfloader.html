@@ -101,6 +101,10 @@
         }
 
         async function printBuffer(gltf, accessorId, showname) {
+            if (accessorId == null) {
+                return;
+            }
+
             const bufferViewId = gltf.accessors[accessorId].bufferView;
             let uri = gltf.buffers[gltf.bufferViews[bufferViewId].buffer].uri;
 
@@ -179,6 +183,23 @@
                 let path = channel.target.path;
                 let sampler = animation.samplers[channelId];
                 output("Animation channel #" + channelId + ": " + nodeId + " (" + path + ", " + sampler.interpolation + ")");
+
+                if (path == "weights") {
+                    let meshId = gltf.nodes[nodeId].mesh;
+                    let mesh = gltf.meshes[meshId];
+                    output("Number of shape keys: " + mesh.weights.length);
+                    if (mesh.extras != null) {
+                        mesh.extras.targetNames.forEach(name => output("Shape key name: " + name));
+                    }
+
+                    mesh.primitives.forEach(primitive => {
+                        primitive.targets.forEach(async (target, i) => {
+                            await printBuffer(gltf, target.POSITION, "shapekey positions #" + i);
+                        });
+                    });
+
+
+                }
 
                 await printBuffer(gltf, sampler.input, "animation inputs");
                 await printBuffer(gltf, sampler.output, "animation outputs");
