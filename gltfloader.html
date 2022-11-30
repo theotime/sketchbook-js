@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>
-        GLTF
+        GLTF dumper
     </title>
     <style>
         body {
@@ -15,16 +15,31 @@
 
 <body>
     <input type="file" id="input-file" accept=".gltf" />
-    <br><br>
     <div id="output">
         <p></p>
     </div>
+    <!--<script src="gltfmodel.js"></script>-->
     <script>
 
         /*
-            GLTF loader.
-        */
+            GLTF dumper.
+            Implement a small subset of the specification (just dump the data).
 
+            Refs:
+            https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/README.md
+            https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html
+
+            SceneGraph:
+            scenes -> nodes (translation, rotation, scale, matrix)
+
+            Positions, normals, UVs, indices:
+            scenes -> nodes -> meshes (POSITION, NORMAL, TEXCOORD_0, indices) -> accessors -> bufferviews -> buffers
+
+            Animations (sceneGraph: objects):
+            animations  (channels) -> nodes
+                        (samplers) -> accessors -> bufferviews -> buffers
+
+        */
 
         const MAX_ELEMENT_PRINT = 200;
 
@@ -35,6 +50,15 @@
         const fetch_uri = "DragonAttenuation/glTF/";
         const fetch_filename = "DragonAttenuation";
         const fetch_ext = ".gltf";
+
+
+        const defaultGltf = {
+            "asset": { "generator": "", "version": "2.0" },
+            "scene": 0,
+            "scenes": [{ "name": "Scene", "nodes": [1, 4] }],
+            "nodes": [{ "name": "Empty" }, { "children": [0], "name": "Empty.001" }, { "name": "Empty.002" },
+            { "name": "Empty.003" }, { "children": [2, 3], "name": "Empty.004" }]
+        };
 
 
         const $ = (e) => document.querySelector(e);
@@ -51,12 +75,10 @@
             $("#output p").innerHTML = "";
         }
 
-        // https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_002_BasicGltfStructure.md
-
         // constants
         // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#accessor-data-types
         const bufferTypeComponent = { 5123: Uint16Array, 5125: Uint32Array, 5126: Float32Array };
-        const sizeofType = { SCALAR: 1, VEC2: 2, VEC3: 3 };
+        const sizeofType = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
 
         function printNumbers(buf, offs, size, groupnum, format) {
             let view = new format(buf, offs, size * groupnum);
@@ -75,9 +97,10 @@
             }
 
             output(dump);
+            output();
         }
 
-        async function printBuffer(gltf, accessorId, name) {
+        async function printBuffer(gltf, accessorId, showname) {
             const bufferViewId = gltf.accessors[accessorId].bufferView;
             let uri = gltf.buffers[gltf.bufferViews[bufferViewId].buffer].uri;
 
@@ -94,9 +117,9 @@
                 reader.onload = function () {
                     let buf = reader.result;
 
+
                     output();
-                    output();
-                    output("(" + name + ")");
+                    output("(" + showname + ")");
 
                     printNumbers(
                         buf,
@@ -127,33 +150,54 @@
                 trs.push(node.scale);
             }
 
+            if (node.matrix) {
+                trs = node.matrix;
+            }
+
             return trs;
         }
 
-        function printScenegraph(gltf, nodeId, prefix = "", modelMat = ["identity"]) {
+        function printSceneGraph(gltf, nodeId, prefix = "", modelMat = ["identity"]) {
 
             let trsMat = buildTrsMatrix(gltf.nodes[nodeId]);
             modelMat.push(trsMat);
 
             output(prefix + " " + gltf.nodes[nodeId].name + " :: modelMat = " + modelMat);
             if (gltf.nodes[nodeId].children) {
-                gltf.nodes[nodeId].children.forEach(child => printScenegraph(gltf, child, prefix + "+", modelMat));
+                gltf.nodes[nodeId].children.forEach(child => printSceneGraph(gltf, child, prefix + "+", modelMat));
             }
+        }
+
+        function printAnimation(gltf, animation) {
+            if (animation.name) {
+                output("Animation name: " + animation.name);
+            }
+
+            animation.channels.forEach(async channel => {
+                let channelId = channel.sampler;
+                let nodeId = channel.target.node;
+                let path = channel.target.path;
+                let sampler = animation.samplers[channelId];
+                output("Animation channel #" + channelId + ": " + nodeId + " (" + path + ", " + sampler.interpolation + ")");
+
+                await printBuffer(gltf, sampler.input, "animation inputs");
+                await printBuffer(gltf, sampler.output, "animation outputs");
+            });
         }
 
         function printMesh(gltf, nodeId) {
 
             const node = gltf.nodes[nodeId];
-            output(node.name);
+            output("Node (object): " + node.name);
 
             if (node.mesh != null) {
                 const mesh = gltf.meshes[node.mesh];
-                output(mesh.name);
+                output("Mesh: " + mesh.name);
                 mesh.primitives.forEach(async primitive => {
-                    await printBuffer(gltf, primitive.attributes.POSITION, "position");
-                    await printBuffer(gltf, primitive.attributes.NORMAL, "normal");
-                    await printBuffer(gltf, primitive.attributes.TEXCOORD_0, "uv");
-                    await printBuffer(gltf, primitive.indices, "face");
+                    await printBuffer(gltf, primitive.attributes.POSITION, "mesh positions");
+                    await printBuffer(gltf, primitive.attributes.NORMAL, "mesh normals");
+                    await printBuffer(gltf, primitive.attributes.TEXCOORD_0, "mesh UVs");
+                    await printBuffer(gltf, primitive.indices, "mesh faces");
                 });
             } else {
                 output("no mesh.");
@@ -165,25 +209,31 @@
         }
 
         function dumpGLTF(gltf) {
-            output();
-            output("scenegraph");
-            output("----------");
-            output();
+            const outputSection = s => { output(), output(), output(s), output('-'.repeat(s.length)), output() };
+
+            outputSection("Scenegraph");
             gltf.scenes.forEach(scene => {
                 scene.nodes.forEach(node => {
-                    printScenegraph(gltf, node);
+                    printSceneGraph(gltf, node);
                 });
             });
 
-            output();
-            output("meshes");
-            output("------");
-            output();
+            if (gltf.animations) {
+                outputSection("Animations");
+                gltf.animations.forEach(animation => {
+                    printAnimation(gltf, animation);
+                });
+            }
+
+
+            outputSection("Meshes");
             gltf.scenes.forEach(scene => {
                 scene.nodes.forEach(node => {
                     printMesh(gltf, node);
                 });
             });
+
+            outputSection("Buffers (dump)");
 
         }
 
@@ -220,6 +270,7 @@
                 fileInput.addEventListener("change", function () {
                     processFile(this.files[0]);
                 }, false);
+                dumpGLTF(defaultGltf);
             } else {
                 fileInput.setAttribute("disabled", "");
                 // for multi-part files gltf (with .bin), so you wont get kicked out from CORS
