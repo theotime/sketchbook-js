@@ -185,6 +185,21 @@
             });
         }
 
+        function printTextureURI(gltf, matId) {
+            const texId = gltf.materials[matId].pbrMetallicRoughness.baseColorTexture.index;
+            if (texId != null) {
+                const imgId = gltf.textures[texId].source;
+                const uri = gltf.images[imgId].uri;
+                //const paramId = textures[texId].sampler
+                //const params = samplers[paramId]
+                if (uri.slice(0, 21) == "data:image/png;base64") {
+                    output("base64 data blob.")
+                } else {
+                    output(uri);
+                }
+            }
+        }
+
         function printMesh(gltf, nodeId) {
 
             const node = gltf.nodes[nodeId];
@@ -225,6 +240,16 @@
                 });
             }
 
+            if (gltf.textures && gltf.images && gltf.materials) {
+                outputSection("Textures");
+                gltf.meshes.forEach(mesh => {
+                    mesh.primitives.forEach(primitive => {
+                        if (primitive.material != null) {
+                            printTextureURI(gltf, primitive.material);
+                        }
+                    });
+                });
+            }
 
             outputSection("Meshes");
             gltf.scenes.forEach(scene => {
