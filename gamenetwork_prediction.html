@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Game Network Prediction
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas-client0"></canvas>
+    <!--<div>(server computation) velX: <span id="velX">1.0</span> posX: <span id="posX">1.0</span> velY: <span
+            id="velY">1.0</span> posY: <span id="posY">1.0</span> latency (ms): <span id="latency">0</span> </div>-->
+    <div>(server computation) velX: <span id="velX-client0">1.0</span> - posX: <span id="posX-client0">1.0</span> -
+        latency (ms): <span id="latency-client0">0</span> </div>
+
+    <br><br>
+
+    <canvas id="canvas-client1"></canvas>
+    <!--<div>(server computation) velX: <span id="velX">1.0</span> posX: <span id="posX">1.0</span> velY: <span
+            id="velY">1.0</span> posY: <span id="posY">1.0</span> latency (ms): <span id="latency">0</span> </div>-->
+    <div>(server computation) velX: <span id="velX-client1">1.0</span> - posX: <span id="posX-client1">1.0</span> -
+        latency (ms): <span id="latency-client1">0</span> </div>
+    <script>
+
+        /*
+            Game Network Prediction-Reconciliation & Entity interpolation (mockup)
+
+            Classes:
+                Network: simulate a network
+                Physics: shared code between client & server to calculate state from inputs
+                Client: client mockup
+                Server: server mockup
+
+            FIXED_LATENCY:  add random jitter to the fake latency (setTimeout in Network.sendPacket)
+                            but gonna mess with the interpolation.
+            ENABLE_PREDICTION: enable/disable prediction & reconciliation.
+            ENABLE_EINTERPOLATION: enable/disable entity interpolations.
+
+            Refs used for this sketch:
+            https://www.gabrielgambetta.com/client-server-game-architecture.html
+            https://developer.valvesoftware.com/wiki/Source_Multiplayer_Networking
+
+        */
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+
+        const FPS = 60; // not used
+        const FIXED_LATENCY = true;
+        const DEFAULT_LATENCY = 500;
+        const ENABLE_PREDICTION = true;
+        const ENABLE_EINTERPOLATION = true;
+
+
+        const width = 256 * 3, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+
+        function initCanvas(canvas) {
+            let ctx = canvas.getContext("2d");
+            canvas.width = width * pixelRatio;
+            canvas.height = height * pixelRatio;
+            canvas.style.width = `${width}px`;
+            canvas.style.height = `${height}px`;
+            ctx.scale(pixelRatio, pixelRatio);
+
+            return ctx;
+        }
+
+        // Simulate network
+        class Network {
+            constructor() { }
+
+            static randomLatency(latency) {
+                let r = 0;
+                if (!FIXED_LATENCY) {
+                    let delta = latency / 4;
+                    r = Math.floor(Math.random() * delta * 2 - delta);
+                }
+
+                return latency + r;
+            }
+
+            static recvPacket(socket, packet) {
+                // re-order packets received
+                if (packet.id == socket.lastPacketReceived + 1) {
+                    socket.packets.push(packet);
+                    socket.lastPacketReceived++;
+
+                    let idx = socket.unorderedPackets.findIndex(e => e.id == socket.lastPacketReceived + 1);
+                    while (idx != -1) {
+                        socket.packets.push(socket.unorderedPackets[idx]);
+                        socket.lastPacketReceived++;
+                        socket.unorderedPackets.splice(idx, 1);
+                        idx = socket.unorderedPackets.findIndex(e => e.id == socket.lastPacketReceived + 1);
+                    }
+                } else {
+                    socket.unorderedPackets.push(packet);
+                }
+
+            }
+
+            static sendPacket(socket, latency, packet) {
+                setTimeout(Network.recvPacket, Network.randomLatency(latency), socket, packet);
+            }
+        }
+
+        class Physics {
+            constructor() { }
+
+            static computePosX(entity, inputX, dt) {
+                const maxspeed = 200;
+                const accX = 200;
+
+                entity.velX += inputX * accX * dt;
+
+                if (inputX == 0) {
+                    entity.velX -= Math.sign(entity.velX) * accX * dt; // deceleration
+                    if (Math.abs(entity.velX) < 0.1) {
+                        entity.velX = 0;
+                    }
+                }
+                entity.velX = Math.sign(entity.velX) * Math.min(Math.abs(entity.velX), maxspeed);
+
+                entity.posX += entity.velX * dt;
+            }
+        }
+
+        class Server {
+            constructor() {
+                this.registredClients = [];
+                this.nextId = -1;
+            }
+
+            updateUI(clientId) {
+                let entity = this.registredClients[clientId];
+                $("#posX-client" + clientId).innerText = entity.posX.toFixed(2);
+                $("#velX-client" + clientId).innerText = entity.velX.toFixed(2);
+            }
+
+            computeLatency(ts, clientId) {
+                let latency = Date.now() - ts;
+                $("#latency-client" + clientId).innerText = latency;
+            }
+
+            auth(client) {
+                this.nextId += 1;
+                this.registredClients.push({
+                    id: this.nextId,
+                    socket: client,
+                    posX: width / 2 + this.nextId * 80, // just avoid superposition at start
+                    posY: height / 2,
+                    velX: 0,
+                    velY: 0,
+                    jumping: false,
+                    size: 16,
+                    color: client.color,
+                    lastCmdId: -1,// last usercmd applied to the simulation
+                    packets: [],
+                    lastPacketSend: -1,
+                    unorderedPackets: [],
+                    lastPacketReceived: -1
+                });
+
+                return this.nextId;
+            }
+
+            sendState(client, state) {
+                client.lastPacketSend += 1;
+                let packet = {
+                    id: client.lastPacketSend,
+                    state: state,
+                    lastCmdId: client.lastCmdId
+                };
+                //console.log("send packet id: " + packet.id);
+                Network.sendPacket(client.socket, client.socket.latency, packet)
+            }
+
+            simulate() {
+                this.registredClients.forEach(client => {
+                    if (this.registredClients[client.id].packets.length == 0) {
+                        //console.log("server: no commands");
+                    } else {
+                        // apply command if there is commands
+                        while (this.registredClients[client.id].packets.length != 0) {
+                            let usercmd = this.registredClients[client.id].packets.shift();
+                            this.computeLatency(usercmd.ts, client.id);
+                            //console.log("usercmd id:" + usercmd.id);
+                            Physics.computePosX(this.registredClients[client.id], usercmd.input.x, usercmd.msec);
+                            this.registredClients[client.id].lastCmdId = usercmd.id;
+                        }
+                    }
+                    this.updateUI(client.id);
+                });
+
+                //this.sendSnapshot();
+            }
+
+            sendSnapshot() {
+
+                let allstates = [];
+                this.registredClients.forEach(client => {
+                    let state = {
+                        id: client.id,
+                        posX: client.posX,
+                        posY: client.posY,
+                        size: client.size,
+                        color: client.color
+                    };
+                    allstates.push(state);
+                });
+
+                this.registredClients.forEach(client => {
+                    let pollState = {
+                        posX: client.posX,
+                        posY: client.posY,
+                        velX: client.velX,
+                        velY: client.velY,
+                        allstates: allstates
+                    };
+                    this.sendState(this.registredClients[client.id], pollState);
+                });
+            }
+
+            run() {
+                console.log("running server.");
+
+                setInterval(
+                    this.simulate.bind(this),
+                    30 // run at lower rate than client, 30ms = 33 tick per seconds
+                );// 
+
+                setInterval(
+                    this.sendSnapshot.bind(this),
+                    100 // 100ms = 10 snapshots per seconds
+                );
+            }
+        }
+
+        class Client {
+            constructor(latency, enable_prediction, enable_interpolation, ctx, color) {
+
+                this.latency = latency; // ms, for 1 packet from sender to receiver
+                this.enable_prediction = enable_prediction;
+                this.enable_interpolation = enable_interpolation;
+
+                this.ctx = ctx;
+                this.color = color;
+
+                this.server = null;
+                this.socket = null;
+                this.id = null;
+
+                this.frames = 0;
+                this.currentTsInterpolation = 0;
+                this.lastTime = Date.now();
+                this.deltaTime = 0;
+
+                this.cmdId = 0;
+
+                this.lastUserCmdTs = Date.now();
+                this.lastCmdIdAck = -1;
+
+                this.upPressed = false;
+                this.downPressed = false;
+                this.leftPressed = false;
+                this.rightPressed = false;
+
+                this.prediction = {
+                    posX: 0,
+                    posY: 0,
+                    velX: 0,
+                    velY: 0,
+                    userCmds: [],
+                    size: 16
+                };
+
+                this.packets = [];
+                this.unorderedPackets = [];
+                this.lastPacketReceived = -1;
+
+                this.allstates = { ts: 0, states: [] };
+                this.prevAllstates = { ts: 0, states: [] };
+
+                KH_registerClient(this);
+            }
+
+            storeInputs(keyStates) {
+                if (keyStates.upPressed !== undefined) {
+                    this.upPressed = keyStates.upPressed;
+                }
+
+                if (keyStates.downPressed !== undefined) {
+                    this.downPressed = keyStates.downPressed;
+                }
+
+                if (keyStates.leftPressed !== undefined) {
+                    this.leftPressed = keyStates.leftPressed;
+                }
+
+                if (keyStates.rightPressed !== undefined) {
+                    this.rightPressed = keyStates.rightPressed;
+                }
+            }
+
+            pollInputs() {
+                let input = { x: 0, y: 0 };
+                if (this.leftPressed) {
+                    input.x -= 1;
+                }
+                if (this.rightPressed) {
+                    input.x += 1;
+                }
+
+                return input;
+            }
+
+            drawBackground() {
+                this.ctx.fillStyle = "bisque";
+                this.ctx.fillRect(0, 0, width, height);
+            }
+
+            drawEntity(px, py, r, color) {
+                this.ctx.fillStyle = color;
+                this.ctx.beginPath();
+                this.ctx.arc(px, py, r, 0, Math.PI * 2);
+                this.ctx.fill();
+            }
+
+            draw() {
+                this.drawBackground();
+
+                // All other players
+                if (this.enable_interpolation) {
+
+                    if (this.allstates.states.length && this.prevAllstates.states.length) {
+
+                        const clamp = (x, min = 0, max = 1) => Math.min(max, Math.max(min, x));
+                        const invlerp = (x, min, max) => clamp((x - min) / (max - min));
+                        const lerp = (x, min, max) => min + x * (max - min);
+
+                        let t = 1;
+                        if (this.prevAllstates.ts != this.allstates.ts) {
+                            // need a fixed rate to work properly, (cur - prev) must be constant.
+                            t = invlerp(this.currentTsInterpolation, this.prevAllstates.ts, this.allstates.ts);
+                        }
+
+                        //if (this.id)
+                        //console.log(this.allstates.ts - this.prevAllstates.ts);
+                        //console.log(t + ":" + this.prevAllstates.ts + ":" + this.allstates.ts);
+
+                        this.allstates.states.forEach(entity => {
+                            if (entity.id != this.id) {
+
+                                let prev = this.prevAllstates.states[entity.id].posX;
+                                let curr = entity.posX
+                                let posX = lerp(t, prev, curr);
+
+                                this.drawEntity(posX, entity.posY, entity.size, entity.color);
+                            }
+                        });
+
+                    }
+
+                } else {
+                    if (this.allstates.states.length) {
+                        this.allstates.states.forEach(entity => {
+                            if (entity.id != this.id) {
+                                this.drawEntity(entity.posX, entity.posY, entity.size, entity.color);
+                            }
+                        });
+                    }
+
+                }
+
+
+                // The player
+                this.drawEntity(this.prediction.posX, this.prediction.posY, this.prediction.size, this.color);
+
+            }
+
+            // 1000 / fps = ~16ms
+            frame(client) {
+                this.frames++;
+
+                let cur = Date.now();
+                this.deltaTime = cur - this.lastTime;
+                this.lastTime = cur;
+
+                this.currentTsInterpolation += this.deltaTime;
+
+                this.ReadPackets(); // ReadPackets
+                this.commands();// Commands, SendCmd
+
+                this.draw();
+
+                requestAnimationFrame(this.frame.bind(this));
+            }
+
+            ReadPackets() {
+                /*
+                while (this.packets.length != 0) {
+                    let packet = this.packets.shift();
+                    //console.log("packet id: " + packet.id);
+                    this.updateState(packet.state, packet.lastCmdId);
+                }*/
+
+                // sample only one packet max each frame
+                if (this.packets.length) {
+                    let packet = this.packets.shift();
+                    this.updateState(packet.state, packet.lastCmdId);
+                }
+            }
+
+            updateState(state, lastCmdId) {
+                if (lastCmdId == this.lastCmdIdAck) {
+                    //console.log("client: no new state, ignore.");
+                    return;
+                } else {
+                    //console.log("cmds: " + lastCmdId + ":" + this.lastCmdIdAck)
+                }
+
+                // store the two last received world states snapshots so we can interpolate
+                this.prevAllstates = this.allstates;
+                this.currentTsInterpolation = this.prevAllstates.ts;
+                this.allstates = { ts: Date.now(), states: state.allstates };
+
+                this.prediction.posX = state.posX;
+                this.prediction.posY = state.posY;
+                this.prediction.velX = state.velX;
+                this.prediction.velY = state.velY;
+
+                this.lastCmdIdAck = lastCmdId;
+
+                if (this.enable_prediction) {
+                    // discard validated usercmd
+                    let cmdId = -1;
+                    while (cmdId != lastCmdId) {
+                        let usercmd = this.prediction.userCmds.shift();
+                        cmdId = usercmd.id;
+                    }
+
+                    let toApplyCmds = [...this.prediction.userCmds];
+
+                    // re-apply usercmd since then
+                    while (toApplyCmds.length != 0) {
+                        let usercmd = toApplyCmds.shift();
+                        Physics.computePosX(this.prediction, usercmd.input.x, usercmd.msec);
+                    }
+                }
+            }
+
+            commands() {
+                let currentTs = Date.now();
+                let msec = currentTs - this.lastUserCmdTs;
+                this.lastUserCmdTs = currentTs;
+
+                let input = this.pollInputs();
+                let usercmd = { id: this.cmdId, ts: currentTs, msec: msec / 1000, input: input };
+                this.cmdId++;
+
+                // prediction
+                if (this.enable_prediction) {
+                    Physics.computePosX(this.prediction, usercmd.input.x, usercmd.msec);
+                    this.prediction.userCmds.push(usercmd);
+                }
+
+                this.sendUserCmd(usercmd);
+            }
+
+            sendUserCmd(usercmd) {
+                Network.sendPacket(this.socket, this.latency, usercmd)
+            }
+
+            auth(server) {
+                let id = server.auth(this);
+                this.server = server;
+                this.socket = server.registredClients[id];
+                this.id = id;
+            }
+
+            run() {
+                console.log("running client.");
+
+                this.frame();
+
+                /*setInterval(
+                    this.commands.bind(this),
+                    30, // 30ms = 33 tick per seconds
+                );*/
+
+            }
+        }
+
+        var KH_registredClients = [];
+        const KH_KeyDownHandler = event => KH_KeyHandler(event, true);
+        const KH_KeyUpHandler = event => KH_KeyHandler(event, false);
+        function KH_KeyHandler(event, state) {
+            const keyboardEnum = {
+                left: 37, up: 38, right: 39, down: 40,
+                keyj: 74, keyi: 73, keyl: 76, keyk: 75
+            };
+
+            let keyStates = [];
+            let keyState = {
+                upPressed: undefined,
+                downPressed: undefined,
+                leftPressed: undefined,
+                rightPressed: undefined
+            }
+
+            keyStates.push({ ...keyState });
+            keyStates.push({ ...keyState });
+
+            // Player #0
+            if (event.keyCode == keyboardEnum.right) {
+                keyStates[0].rightPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.left) {
+                keyStates[0].leftPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.down) {
+                keyStates[0].downPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.up) {
+                keyStates[0].upPressed = state;
+            }
+
+            // Player #1
+            if (event.keyCode == keyboardEnum.keyl) {
+                keyStates[1].rightPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.keyj) {
+                keyStates[1].leftPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.keyk) {
+                keyStates[1].downPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.keyi) {
+                keyStates[1].upPressed = state;
+            }
+
+            KH_registredClients.forEach((client, i) => client.storeInputs(keyStates[i]));
+        }
+
+        function KH_registerClient(client) {
+            KH_registredClients.push(client);
+        }
+
+        function KH_init() {
+            document.addEventListener("keydown", KH_KeyDownHandler, false);
+            document.addEventListener("keyup", KH_KeyUpHandler, false);
+        }
+
+        function init() {
+
+            let ctx0 = initCanvas($("#canvas-client0"));
+            let ctx1 = initCanvas($("#canvas-client1"));
+
+            KH_init(); // handle inputs for all the DOM, then dispatch to clients
+
+            let server = new Server();
+            server.run();
+
+            let client0 = new Client(DEFAULT_LATENCY, ENABLE_PREDICTION, ENABLE_EINTERPOLATION, ctx0, "tomato");
+            client0.auth(server);
+
+            let client1 = new Client(100, ENABLE_PREDICTION, ENABLE_EINTERPOLATION, ctx1, "red");
+            client1.auth(server);
+
+            client0.run();
+            client1.run();
+        }
+
+
+        init();
+
+    </script>
+</body>
+
+</html>
