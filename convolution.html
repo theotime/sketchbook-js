@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Convolution (1D)
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="output">
+        <p></p>
+    </div>
+    <script>
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+        const clamp = (x, min = 0, max = 1) => Math.min(max, Math.max(min, x));
+        const invlerp = (x, min, max) => clamp((x - min) / (max - min));
+        const lerp = (x, min, max) => min + x * (max - min);
+        const remap = (x, fmin, fmax, tmin, tmax) => lerp(invlerp(x, fmin, fmax), tmin, tmax);
+
+        const zero = (n) => Array(n).fill(0);
+        const sequence = (n) => [...Array(n)].map((_, i) => i);
+        const range = (min, max, step) => [...Array(Math.floor((max - min) / step))].map((_, i) => min + i * step);
+        const linspace = (min, max, n) => [...Array(n)].map((_, i) => min + i * (max - min) / (n - 1));
+        const apply = (fn, a) => a.map(t => fn(t));
+
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        function drawPlot(x, y, color = "black", range = null) {
+            ctx.strokeStyle = color;
+
+            ctx.beginPath();
+
+            let xmin, xmax, ymin, ymax;
+            if (range == null) {
+                xmin = ymin = Infinity;
+                xmax = ymax = -Infinity;
+
+                for (let v of x) {
+                    xmin = Math.min(v, xmin);
+                    xmax = Math.max(v, xmax);
+                }
+
+                for (let v of y) {
+                    ymin = Math.min(v, ymin);
+                    ymax = Math.max(v, ymax);
+                }
+            } else {
+                xmin = range.x[0];
+                xmax = range.x[1];
+                ymin = range.y[0];
+                ymax = range.y[1];
+            }
+
+            const border = 20;
+            const normalizeX = v => remap(v, xmin, xmax, border, width - border);
+            const normalizeY = v => height - remap(v, ymin, ymax, border, height - border);
+
+            let firstPointDrawn = false;
+            let i = 0;
+            const sampleSize = x.length;
+            while (!firstPointDrawn && i < sampleSize) {
+                if (x[i] >= xmin && x[i] <= xmax && y[i] >= ymin && y[i] <= ymax) {
+                    ctx.moveTo(
+                        normalizeX(x[i]),
+                        normalizeY(y[i])
+                    );
+                    firstPointDrawn = true;
+                }
+                i++;
+            }
+
+            if (!firstPointDrawn) {
+                return;
+            }
+
+            for (; i < sampleSize; i++) {
+                if (x[i] >= xmin && x[i] <= xmax && y[i] >= ymin && y[i] <= ymax) {
+                    let plotX = normalizeX(x[i]);
+                    let plotY = normalizeY(y[i]);
+                    ctx.lineTo(plotX, plotY);
+                }
+            }
+
+            ctx.stroke();
+        }
+
+        function drawFunction(fn, range, samples, color) {
+            let graph = { x: [], y: [] };
+            graph.x = linspace(range.x[0], range.x[1], samples);
+            graph.y = apply(fn, graph.x);
+            drawPlot(graph.x, graph.y, color, range);
+        };
+
+        // https://en.wikipedia.org/wiki/Moving_average
+        // average on 3 samples, centered at pos i
+        function movingAverage3(x) {
+            let y = Array(x.length);
+            for (let i = 1; i < x.length - 1; i++) {
+                y[i] = (x[i - 1] + x[i] + x[i + 1]) / 3;
+            }
+            return y.slice(1, x.length - 1);
+        }
+
+        // average on past values only (lag)
+        // equivalent to a convolution with boxcar filter of hight 1/window.
+        function movingAverage(x, window = 3) {
+            let y = zero(x.length);
+            let lag = window - 1;
+            for (let n = lag; n < x.length; n++) {
+                //y[n] = (x[n] + x[n - 1] + x[n - 2]) / window; // moving average on 3
+                for (let k = 0; k < window; k++) {
+                    y[n] += x[n - k];
+                }
+                y[n] /= window;
+            }
+            return y.slice(lag, x.length);
+        }
+
+        // http://www.songho.ca/dsp/convolution/convolution.html
+        function convolution(x, h = [0.3333, 0.3333, 0.3333]) { // h[] = impulse response
+            let y = zero(x.length);
+            let lag = h.length - 1;
+            for (let n = lag; n < x.length; n++) {
+                for (let k = 0; k < h.length; k++) {
+                    y[n] += x[n - k] * h[k]; // x[n] * h[0], x[n-1] * h[1] ...
+                }
+            }
+            return y.slice(lag, x.length);
+        }
+
+
+
+        ctx.lineWidth = 1;
+        const xyrange = { x: [- 2.0 * Math.PI, 2.0 * Math.PI], y: [-1, 1] };
+        drawCanvas();
+        /*
+        drawFunction(x => x, xyrange, 80, "blue");
+        drawFunction(Math.cos, xyrange, 80, "tomato");
+        drawFunction(t => Math.cos(t + Math.PI), xyrange, 80, "orange");
+        drawFunction(Math.sin, xyrange, 80, "red");
+        */
+
+        //drawFunction(Math.cos, xyrange, 80, "tomato");
+
+        output("(orange) original - (blue) moving average on 3 - (red) convolution")
+
+        const noise = 0.2;
+        const noisesin = t => Math.sin(t) + remap(Math.random(), 0, 1, -noise, noise);
+
+        let sampleNumber = 80;
+        let graph = { x: [], y: [] };
+        graph.x = linspace(xyrange.x[0], xyrange.x[1], sampleNumber);
+        graph.y = apply(noisesin, graph.x);
+        drawPlot(graph.x, graph.y, "tomato", xyrange);
+
+        let magraph = { x: [], y: [] };
+        magraph.y = movingAverage3(graph.y);
+        //output(magraph.y);
+        magraph.x = graph.x.slice(1, sampleNumber - 1);
+        drawPlot(magraph.x, magraph.y, "blue", xyrange);
+
+        let n = 8;
+        let h = Array(n).fill(1.0 / n); // "boxcar filter", low-pass
+        magraph.y = convolution(graph.y, h);
+        //output(magraph.y);
+        magraph.x = graph.x.slice(n - 1, sampleNumber);
+        drawPlot(magraph.x, magraph.y, "red", xyrange);
+
+    </script>
+</body>
+
+</html>
