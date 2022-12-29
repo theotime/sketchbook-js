@@ -159,6 +159,31 @@
             }
             return y.slice(lag, x.length);
         }
+        const firfilter = convolution; // a fir filter can be implemented as a simple convolution
+
+        // iir filter (infinite impulse response)
+        // a: feedback factors
+        // b: input factors
+        function iirfilter(x, a, b) {
+            let y = zero(x.length);
+            let lag = b.length - 1;
+            for (let n = lag; n < x.length; n++) {
+
+                // input
+                for (let k = 0; k < b.length; k++) {
+                    y[n] += x[n - k] * b[k]; // x[n] * b[0], x[n-1] * b[1] ...
+                }
+
+                // feedback
+                for (let k = 0; k < a.length; k++) {
+                    if (n - k - 1 < 0) {
+                        break;
+                    }
+                    y[n] += y[n - k - 1] * a[k]; // y[n-1] * a[0] ... notice a0 is applied to y[n-1]
+                }
+            }
+            return y.slice(lag, x.length);
+        }
 
 
 
@@ -174,7 +199,7 @@
 
         //drawFunction(Math.cos, xyrange, 80, "tomato");
 
-        output("(orange) original - (blue) moving average on 3 - (red) convolution")
+        output("(orange) original noisy signal - (red) box car fir filter - (green) iir first order filter")
 
         const noise = 0.2;
         const noisesin = t => Math.sin(t) + remap(Math.random(), 0, 1, -noise, noise);
@@ -187,16 +212,22 @@
 
         let magraph = { x: [], y: [] };
         magraph.y = movingAverage3(graph.y);
-        //output(magraph.y);
         magraph.x = graph.x.slice(1, sampleNumber - 1);
-        drawPlot(magraph.x, magraph.y, "blue", xyrange);
+        //drawPlot(magraph.x, magraph.y, "blue", xyrange);
 
         let n = 8;
         let h = Array(n).fill(1.0 / n); // "boxcar filter", low-pass
-        magraph.y = convolution(graph.y, h);
-        //output(magraph.y);
+        magraph.y = firfilter(graph.y, h);
         magraph.x = graph.x.slice(n - 1, sampleNumber);
         drawPlot(magraph.x, magraph.y, "red", xyrange);
+
+        // first order low pass filter
+        let alpha = 0.15; // cutoff: alpha*freqsampling
+        let a = [-(alpha - 1) / (alpha + 1)];
+        let b = [alpha / (alpha + 1), alpha / (alpha + 1)];
+        magraph.y = iirfilter(graph.y, a, b);
+        magraph.x = graph.x.slice(b.length - 1, sampleNumber);
+        drawPlot(magraph.x, magraph.y, "green", xyrange);
 
     </script>
 </body>
