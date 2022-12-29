@@ -207,17 +207,35 @@
         }
 
         function printTextureURI(gltf, matId) {
-            const texId = gltf.materials[matId].pbrMetallicRoughness.baseColorTexture.index;
+
+            const materials = gltf.materials[matId];
+
+            let texId = null;
+            // first, check for a texture in the pbr base color
+            if (materials.pbrMetallicRoughness && materials.pbrMetallicRoughness && materials.pbrMetallicRoughness.baseColorTexture) {
+                texId = gltf.materials[matId].pbrMetallicRoughness.baseColorTexture.index;
+            }
+            // then, check for a texture in the emissive
+            else if (gltf.materials[matId].emissiveTexture) {
+                texId = gltf.materials[matId].emissiveTexture.index;
+            }
+
             if (texId != null) {
                 const imgId = gltf.textures[texId].source;
                 const uri = gltf.images[imgId].uri;
+                const bufView = gltf.images[imgId].bufferView;
                 //const paramId = textures[texId].sampler
                 //const params = samplers[paramId]
-                if (uri.slice(0, 21) == "data:image/png;base64") {
-                    output("base64 data blob.")
-                } else {
-                    output(uri);
+                if (uri != null) {
+                    if (uri.slice(0, 21) == "data:image/png;base64") {
+                        output("base64 data blob.")
+                    } else {
+                        output(uri);
+                    }
+                } else if (bufView != null) {
+                    output("bufferView: " + bufView);
                 }
+
             }
         }
 
