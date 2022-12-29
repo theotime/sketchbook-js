@@ -52,9 +52,10 @@
         varying vec3 normal;
 
         //uniform sampler2D uTexture;
+        uniform vec3 color;
         
         vec3 black = vec3(.133, .137, .137);
-        vec3 white = vec3(.941, .965, .941);
+        //vec3 white = vec3(.941, .965, .941);
 
         void main(void) {
             //gl_FragColor = texture2D(uTexture, uv);
@@ -65,7 +66,7 @@
             vec3 light = normalize(vec3(1));
             float dotNL = dot(light, normalize(normal));
             dotNL = .5*dotNL+.5;
-            vec3 color = vec3(.05) + white * dotNL;
+            vec3 color = vec3(.05) + color * dotNL;
             color = clamp(color, vec3(0), vec3(1));
             color = sqrt(color);
             
@@ -97,10 +98,19 @@
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
 
+        var drawMode = {
+            "triangles": gl.TRIANGLES,
+            "triangle_strip": gl.TRIANGLE_STRIP
+        }
+
 
         // Inputs
-        let upPressed, downPressed, leftPressed, rightPressed, spacePressed;
-        let keyboardEnum = { left: 37, up: 38, right: 39, down: 40, space: 32 };
+        var upPressed, downPressed, leftPressed, rightPressed, spacePressed, firePressed;
+        const keyboardEnum = { left: 37, up: 38, right: 39, down: 40, space: 32 };
+        var fireCooldown = {
+            threshold: 10,//frames
+            last: 0,
+        };
 
 
         // Parameters
@@ -124,10 +134,18 @@
         //var startGlobalTime;
         var frames = 0;
         var vertexPositionAttribute;
-        var buffer;
         var paused = false;
 
         var defaultMaterial = null;
+
+        // no hierarchy
+        var scene = [{
+            name: "cube.001",
+            mesh: "cube",
+            transform: { translate: [0, 0, 0], rotate: [0, [0, 0, 0]], scale: [1, 1, 1] },
+            material: { color: [.941, .965, .941] }
+        }]
+        var buffers = {};
 
 
         let radians = x => x * (Math.PI / 180);
@@ -142,6 +160,9 @@
             upPressed = downPressed = leftPressed = rightPressed = spacePressed = false;
             document.addEventListener("keydown", keyDownHandler, false);
             document.addEventListener("keyup", keyUpHandler, false);
+
+            document.addEventListener("mousedown", function () { firePressed = true }, false);
+            document.addEventListener("mouseup", function () { firePressed = false }, false);
 
             canvas.onclick = function () {
                 canvas.requestPointerLock();
@@ -197,6 +218,11 @@
         }
 
         function handleInputs() {
+
+            if (firePressed && (frames - fireCooldown.last) > fireCooldown.threshold) {
+                fireCooldown.last = frames;
+                console.log("FIRE");
+            }
 
             let forward = Vec3.scale(cameraFront, cameraSpeed);
 
@@ -265,73 +291,21 @@
             //gl.enable(gl.CULL_FACE);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            buffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(primitiveCubeNormal), gl.STATIC_DRAW);
-
-            defaultMaterial = compileProgram("default");
-            loadCurrentMaterial();
-
-            /*var texture = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, texture);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 255, 255]));
-
-            var image = new Image();
-            image.src = "assets2/container.jpg";
-            image.addEventListener("load", function () {
-                gl.bindTexture(gl.TEXTURE_2D, texture);
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-                gl.generateMipmap(gl.TEXTURE_2D);
-            });*/
-
             perspectiveMatrix = new Mat4x4();
             perspectiveMatrix.perspective(fov, aspect, near, far);
         }
 
-        function loadCurrentMaterial() {
-
-            let mat = defaultMaterial;
-
-            gl.useProgram(mat);
-
+        function createBufferMesh(meshId) {
+            let buffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            vertexPositionAttribute = gl.getAttribLocation(mat, "aVertexPosition");
-            gl.enableVertexAttribArray(vertexPositionAttribute);
-            gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 0);
 
-            vertexColorAttribute = gl.getAttribLocation(mat, "aNormal");
-            gl.enableVertexAttribArray(vertexColorAttribute);
-            gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+            let bufferData = geoPrimitives[meshId].data;
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bufferData), gl.STATIC_DRAW);
 
-            /*vertexColorAttribute = gl.getAttribLocation(mat, "aUV");
-            gl.enableVertexAttribArray(vertexColorAttribute);
-            gl.vertexAttribPointer(vertexColorAttribute, 2, gl.FLOAT, false, 5 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
-            */
+            buffers[meshId] = buffer;
         }
 
-        function draw() {
-            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-            //var current = new Date().getTime();
-            //var elapsedTime = (current - startGlobalTime)/ 1000.0;
-            let elapsedTime = frames / fps;
-
-            let mat = defaultMaterial;
-
-            let view = new Mat4x4();
-            /*
-            let radius = 15;
-            let x = radius * Math.cos(elapsedTime);
-            let z = radius * Math.sin(elapsedTime);
-            view.lookAt([x, 1.5, z], Vec3.zero, Vec3.up);
-            */
-            view.lookAt(cameraPos, Vec3.add(cameraPos, cameraFront), Vec3.up);
-
-            //gl.uniform1f(gl.getUniformLocation(mat, "time"), elapsedTime);
-            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "view"), false, view.get());
-            gl.uniformMatrix4fv(gl.getUniformLocation(mat, "projection"), false, perspectiveMatrix.get());
-            //gl.uniform1i(gl.getUniformLocation(mat, "uTexture"), 0);
-
+        function loadScene() {
 
             let cubePositions = [
                 0.0, 0.0, 0.0,
@@ -346,26 +320,115 @@
                 -1.3, 1.0, -1.5
             ];
 
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            const axis = Vec3.normalize([1, 0.3, 0.5]);
+            for (let i = 1; i < 10; i++) {
+                let objCube = structuredClone(scene[0]);
 
+                if (buffers[objCube.mesh] == null) {
+                    createBufferMesh(objCube.mesh);
+                }
+
+                objCube.transform.translate = cubePositions.slice(i * 3, i * 3 + 3);
+                objCube.transform.rotate[0] = radians(20.0 * i);
+                objCube.transform.rotate[1] = axis;
+
+                scene.push(objCube);
+            }
+
+            scene.push({
+                name: "plane.001",
+                mesh: "quad",
+                transform: { translate: [0, -4, 0], rotate: [radians(90), Vec3.left], scale: [30, 30, 30] },
+                material: { color: [.941, .165, .041] }
+            });
+            createBufferMesh("quad");
+
+            defaultMaterial = compileProgram("default");
+            gl.useProgram(defaultMaterial);
+
+            /*var texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 255, 255]));
+
+            var image = new Image();
+            image.src = "assets2/container.jpg";
+            image.addEventListener("load", function () {
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+                gl.generateMipmap(gl.TEXTURE_2D);
+            });*/
+        }
+
+        function loadBuffer(meshId) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers[meshId]);
+
+            vertexPositionAttribute = gl.getAttribLocation(defaultMaterial, "aVertexPosition");
+            gl.enableVertexAttribArray(vertexPositionAttribute);
+            gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 0);
+
+            vertexColorAttribute = gl.getAttribLocation(defaultMaterial, "aNormal");
+            gl.enableVertexAttribArray(vertexColorAttribute);
+            gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+
+            /*vertexColorAttribute = gl.getAttribLocation(defaultMaterial, "aUV");
+            gl.enableVertexAttribArray(vertexColorAttribute);
+            gl.vertexAttribPointer(vertexColorAttribute, 2, gl.FLOAT, false, 5 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+            */
+        }
+
+        function draw() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            //var current = new Date().getTime();
+            //var elapsedTime = (current - startGlobalTime)/ 1000.0;
+            let elapsedTime = frames / fps;
+
+            let view = new Mat4x4();
+            /*
+            let radius = 15;
+            let x = radius * Math.cos(elapsedTime);
+            let z = radius * Math.sin(elapsedTime);
+            view.lookAt([x, 1.5, z], Vec3.zero, Vec3.up);
+            */
+            view.lookAt(cameraPos, Vec3.add(cameraPos, cameraFront), Vec3.up);
+
+            //gl.uniform1f(gl.getUniformLocation(defaultMaterial, "time"), elapsedTime);
+            gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "view"), false, view.get());
+            gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "projection"), false, perspectiveMatrix.get());
+            //gl.uniform1i(gl.getUniformLocation(defaultMaterial, "uTexture"), 0);
+
+            let lastMesh = "";
             let m = new Mat4x4();
-            for (let i = 0; i < 10; i++) {
+            for (const obj of scene) {
+
+                if (obj.mesh != lastMesh) {
+                    loadBuffer(obj.mesh);
+                }
+
                 m.fromIdentity(
+                ).scale(
+                    obj.transform.scale[0],
+                    obj.transform.scale[1],
+                    obj.transform.scale[2]
                 ).rotate(
-                    radians(20.0 * i),
-                    Vec3.normalize([1, 0.3, 0.5])
+                    obj.transform.rotate[0],
+                    obj.transform.rotate[1]
                 ).translate(
-                    cubePositions[i * 3],
-                    cubePositions[i * 3 + 1],
-                    cubePositions[i * 3 + 2]
+                    obj.transform.translate[0],
+                    obj.transform.translate[1],
+                    obj.transform.translate[2]
                 );
 
                 let invModel = m.getInverse(Mat4x4.BYPASS_EXCEPTION).getTranspose();
 
-                gl.uniformMatrix4fv(gl.getUniformLocation(mat, "model"), false, m.get());
-                gl.uniformMatrix4fv(gl.getUniformLocation(mat, "invModel"), false, invModel.get());
+                gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "model"), false, m.get());
+                gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "invModel"), false, invModel.get());
 
-                gl.drawArrays(gl.TRIANGLES, 0, 36);
+                gl.uniform3f(gl.getUniformLocation(defaultMaterial, "color"), obj.material.color[0], obj.material.color[1], obj.material.color[2]);
+
+
+                let mode = geoPrimitives[obj.mesh].mode;
+                gl.drawArrays(drawMode[mode], 0, geoPrimitives[obj.mesh].count);
             }
         }
 
@@ -388,6 +451,7 @@
 
         initInputs();
         initWebgl();
+        loadScene();
         window.requestAnimationFrame(frame);
 
     </script>
