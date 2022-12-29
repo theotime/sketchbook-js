@@ -48,7 +48,7 @@
 
         const equalPoints = (a, b) => a.x == b.x && a.y == b.y;
 
-        function generateRandomAABB(points, num, bordersize, aabb) {
+        function generateRandomAABB(num, bordersize) {
             const random = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
 
             for (let i = 0; i < numRandomPoints; i++) {
@@ -66,13 +66,13 @@
             for (let i = 1; i < numRandomPoints; i++) {
                 min.x = Math.min(min.x, randomPoints[i].x);
                 min.y = Math.min(min.y, randomPoints[i].y);
+
                 max.x = Math.max(max.x, randomPoints[i].x);
                 max.y = Math.max(max.y, randomPoints[i].y);
             }
 
             randomAABB[0] = min;
             randomAABB[1] = max;
-
         }
 
         function fillCircle(px, py, r) {
@@ -113,26 +113,27 @@
         function intersectAABB(ro, rd, aabb) {
             let tmin = -Infinity, tmax = Infinity;
 
-            if (rd.x != 0) {
-                let tx0 = (aabb[0].x - ro.x) / rd.x;
-                let tx1 = (aabb[1].x - ro.x) / rd.x;
+            // disable the div by zero check, otherwise, we got wrong results for ray with 0 slope
+            //if (rd.x != 0) {
+            let tx0 = (aabb[0].x - ro.x) / rd.x;// division by zero => Infinity, computation are still relevant
+            let tx1 = (aabb[1].x - ro.x) / rd.x;
 
-                tmin = Math.max(tmin, Math.min(tx0, tx1));// get the nearest intersection along the ray
-                tmax = Math.min(tmax, Math.max(tx0, tx1));// get the farest intersection along the ray
-            }
+            tmin = Math.max(tmin, Math.min(tx0, tx1));// get the nearest intersection along the ray
+            tmax = Math.min(tmax, Math.max(tx0, tx1));// get the farest intersection along the ray
+            //}
 
-            if (rd.y != 0) {
-                let ty0 = (aabb[0].y - ro.y) / rd.y;
-                let ty1 = (aabb[1].y - ro.y) / rd.y;
+            //if (rd.y != 0) {
+            let ty0 = (aabb[0].y - ro.y) / rd.y;
+            let ty1 = (aabb[1].y - ro.y) / rd.y;
 
-                // same operation as before
-                // get the nearest intersection along the ray,
-                // then compare to prev tmin (get farest)
-                tmin = Math.max(tmin, Math.min(ty0, ty1));
-                // get the farest intersection along the ray,
-                // then compare to prev tmax (get the nearest)
-                tmax = Math.min(tmax, Math.max(ty0, ty1));
-            }
+            // same operation as before
+            // get the nearest intersection along the ray,
+            // then compare to prev tmin (get farest)
+            tmin = Math.max(tmin, Math.min(ty0, ty1));
+            // get the farest intersection along the ray,
+            // then compare to prev tmax (get the nearest)
+            tmax = Math.min(tmax, Math.max(ty0, ty1));
+            //}
 
             if (tmax < tmin) {
                 return [-Infinity, Infinity];
@@ -249,7 +250,7 @@
         });
 
 
-        generateRandomAABB(randomPoints, numRandomPoints, randomBorderSize, randomAABB);
+        generateRandomAABB(numRandomPoints, randomBorderSize);
         updateCanvas();
 
     </script>
