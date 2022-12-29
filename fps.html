@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        First person shooter
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="frames"></div>
+    <div id="output">
+        <p></p>
+    </div>
+    <script src="matrix.js"></script>
+    <script src="geoprimitives.js"></script>
+    <script src="physics.js"></script>
+    <script id="default-vs" type="x-shader/x-vertex">
+        precision mediump float;
+
+        attribute vec3 aVertexPosition;
+        attribute vec3 aNormal;
+        //attribute vec2 aUV;
+
+        //varying vec2 uv;
+        varying vec3 normal;
+
+        //uniform float time;
+        uniform mat4 model;
+        uniform mat4 view;
+        uniform mat4 projection;
+
+        uniform mat4 invModel; // only for normals, it's a mat3 in a mat4 container
+    
+        void main(void) {
+            vec4 p = projection * view * model * vec4(aVertexPosition, 1.0);
+            gl_Position = vec4(p);
+            //uv = aUV;
+            normal = mat3(invModel) * aNormal;
+        }
+    </script>
+    <script id="default-fs" type="x-shader/x-fragment">
+        precision mediump float;
+
+        //varying vec2 uv;
+        varying vec3 normal;
+
+        //uniform sampler2D uTexture;
+        uniform vec3 color;
+        
+        vec3 black = vec3(.133, .137, .137);
+        //vec3 white = vec3(.941, .965, .941);
+
+        void main(void) {
+            //gl_FragColor = texture2D(uTexture, uv);
+            //gl_FragColor = vec4(uv, 0, 1);
+            
+            //vec3 color = normal * .5 + .5;
+            
+            vec3 light = normalize(vec3(1));
+            float dotNL = dot(light, normalize(normal));
+            dotNL = .5*dotNL+.5;
+            vec3 color = vec3(.05) + color * dotNL;
+            color = clamp(color, vec3(0), vec3(1));
+            color = sqrt(color);
+            
+            gl_FragColor = vec4(color, 1);
+        }
+    </script>
+    <script>
+
+        /*
+            Rough draft for a FPS.
+
+            Collisions with simple AABB tests.
+            Raycast AABB for shooting & ground detection.
+
+        */
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        var canvas = $("#canvas");
+        var gl = canvas.getContext("webgl");
+
+        let width = 320, height = 280;
+        let pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+
+        var drawMode = {
+            "triangles": gl.TRIANGLES,
+            "triangle_strip": gl.TRIANGLE_STRIP
+        }
+
+
+        // Inputs
+        var upPressed, downPressed, leftPressed, rightPressed, spacePressed, firePressed;
+        const keyboardEnum = { left: 37, up: 38, right: 39, down: 40, space: 32, keyz: 90, keyq: 81, keys: 83, keyd: 68 };
+        var fireCooldown = {
+            threshold: 10,//frames
+            last: 0,
+        };
+
+
+        // Parameters
+        var fps = 60.0;
+
+        var cameraPos = [0, 0, 3];
+        var cameraFront = Vec3.back;
+        var cameraUp = Vec3.up;
+        var cameraSpeed = 0.1;
+        var sensibility = 0.15;
+        var yaw = -90.0, pitch = 0;
+
+        var fov = 80.0;
+        var aspect = width / height;
+        var near = 0.1;
+        var far = 100.0;
+
+        var perspectiveMatrix = null;
+
+        let player = {
+            position: [0, 0, 0],
+            velocity: [0, 0, 0],
+            jump: 0.7,
+            maxspeed: 0.4,
+            maxfall: -0.02,
+            eye: 1,
+            aabb: [[-1, 0.1, -1], [1, 2, 1]]
+        };
+
+        const gravity = 0.03;
+
+        // Globals
+        var cvar = { flymode: 0 };
+        var frames = 0;
+        var vertexPositionAttribute;
+        var paused = false;
+
+        var defaultMaterial = null;
+
+        // no hierarchy
+        var scene = [{
+            name: "cube.00",
+            mesh: "cube",
+            transform: { translate: [0, 0, 0], rotate: [0, [0, 0, 0]], scale: [4, 4, 4] },
+            material: { color: [.941, .965, .941] },
+            aabb: null
+        }];
+        var buffers = {};
+
+
+        let radians = x => x * (Math.PI / 180);
+
+
+
+        /*
+            Inputs System.
+        */
+
+        function initInputs() {
+            upPressed = downPressed = leftPressed = rightPressed = spacePressed = false;
+            document.addEventListener("keydown", keyDownHandler, false);
+            document.addEventListener("keyup", keyUpHandler, false);
+
+            document.addEventListener("mousedown", function () { firePressed = true }, false);
+            document.addEventListener("mouseup", function () { firePressed = false }, false);
+
+            canvas.onclick = function () {
+                canvas.requestPointerLock();
+            }
+
+            document.addEventListener("pointerlockchange", function () {
+                if (document.pointerLockElement == canvas) {
+                    //console.log("pointer locked");
+                    document.addEventListener("mousemove", cursorHandler, false);
+                } else {
+                    //console.log("pointer unlocked");
+                    document.removeEventListener("mousemove", cursorHandler, false);
+                }
+            }, false);
+        }
+
+        function cursorHandler(event) {
+            yaw += event.movementX * sensibility;
+            pitch += event.movementY * sensibility;
+
+            pitch = Math.min(pitch, 89);
+            pitch = Math.max(pitch, -89);
+
+            let inversedPitch = pitch * -1;
+
+            let direction = [0, 0, 0];
+            direction[0] = Math.cos(radians(yaw)) * Math.cos(radians(inversedPitch));
+            direction[1] = Math.sin(radians(inversedPitch));
+            direction[2] = Math.sin(radians(yaw)) * Math.cos(radians(inversedPitch));
+            cameraFront = Vec3.normalize(direction);
+
+            //console.log("yaw: " + yaw + " ; pitch: " + inversedPitch);
+        }
+
+        const keyDownHandler = event => keyHandler(event, true);
+        const keyUpHandler = event => keyHandler(event, false);
+        function keyHandler(event, state) {
+            if (event.keyCode == keyboardEnum.right || event.keyCode == keyboardEnum.keyd) {
+                rightPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.left || event.keyCode == keyboardEnum.keyq) {
+                leftPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.down || event.keyCode == keyboardEnum.keys) {
+                downPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.up || event.keyCode == keyboardEnum.keyz) {
+                upPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.space) {
+                spacePressed = state;
+            }
+        }
+
+
+        /*
+            Collisions helpers.
+        */
+
+        function raycastScene(origin, direction, tmax, resultObj = { t: 0, obj: null }) {
+            let hitobject = null;
+            let t = Infinity;
+            for (const obj of scene) {
+                if (obj.aabb != null) {
+                    let result = [];
+                    let aabb = [[], []];
+                    for (let i = 0; i < 3; i++) {
+                        aabb[0][i] = obj.aabb[0][i] * obj.transform.scale[i] + obj.transform.translate[i];
+                        aabb[1][i] = obj.aabb[1][i] * obj.transform.scale[i] + obj.transform.translate[i];
+                    }
+
+                    if (Physics.raycastAABB(origin, direction, aabb, result)) {
+                        if (result[0] < t && result[0] < tmax) {
+                            t = result[0];
+                            hitobject = obj;
+                        }
+                    }
+                }
+            }
+
+            if (t != Infinity) {
+                resultObj.t = t;
+                resultObj.obj = hitobject;
+                return true;
+            }
+
+            return false;
+        }
+
+        function testGround() {
+
+            if (player.position[1] < 0) {
+                return true;
+            }
+
+            // test the 4x corners of the bounding box, so it matches the aabb collision tests
+            let frontLeft = Vec3.add(player.position, [player.aabb[0][0], 0, player.aabb[0][2]]);
+            let frontRight = Vec3.add(player.position, [-player.aabb[0][0], 0, player.aabb[0][2]]);
+            let rearLeft = Vec3.add(player.position, [player.aabb[0][0], 0, -player.aabb[0][2]]);
+            let rearRight = Vec3.add(player.position, [-player.aabb[0][0], 0, -player.aabb[0][2]]);
+
+            if (raycastScene(player.position, Vec3.down, 0.5)) {
+                return true;
+            }
+            if (raycastScene(frontLeft, Vec3.down, 0.5)) {
+                return true;
+            }
+            if (raycastScene(frontRight, Vec3.down, 0.5)) {
+                return true;
+            }
+            if (raycastScene(rearLeft, Vec3.down, 0.5)) {
+                return true;
+            }
+            if (raycastScene(rearRight, Vec3.down, 0.5)) {
+                return true;
+            }
+
+            return false;
+        }
+
+        // [[x, y, z], [x, y, z]]
+        function testAABB(aabb1, aabb2) {
+            let result = true;
+            for (let i = 0; i < 3; i++) {
+                result &= aabb1[0][i] <= aabb2[1][i];
+            }
+            for (let i = 0; i < 3; i++) {
+                result &= aabb1[1][i] >= aabb2[0][i];
+            }
+            return result;
+        }
+
+        function testPlayerCollision(position) {
+
+            let playerAABB = [];
+
+            playerAABB[0] = Vec3.add(player.aabb[0], position);
+            playerAABB[1] = Vec3.add(player.aabb[1], position);
+
+            for (const obj of scene) {
+                if (obj.aabb != null) {
+                    let aabb = [[], []];
+                    for (let i = 0; i < 3; i++) {
+                        aabb[0][i] = obj.aabb[0][i] * obj.transform.scale[i] + obj.transform.translate[i];
+                        aabb[1][i] = obj.aabb[1][i] * obj.transform.scale[i] + obj.transform.translate[i];
+                    }
+
+                    if (testAABB(playerAABB, aabb)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+
+        /*
+            Player movement.
+        */
+
+        function handleInputs() {
+
+            if (firePressed && (frames - fireCooldown.last) > fireCooldown.threshold) {
+                fireCooldown.last = frames;
+                //console.log("FIRE");
+                let result = { t: 0, obj: null };
+                if (raycastScene(cameraPos, cameraFront, 50, result)) {
+                    output("We hit " + result.obj.name);
+                }
+            }
+
+            // Camera movement
+            if (cvar.flymode) {
+                moveCameraFlymode();
+            } else {
+                moveCameraGamemode();
+            }
+
+        }
+
+        function moveCameraFlymode() {
+            let forward = Vec3.scale(cameraFront, cameraSpeed);
+            let right = Vec3.normalize(Vec3.cross(cameraFront, cameraUp));
+            right = Vec3.scale(right, cameraSpeed);
+            let up = Vec3.scale(cameraUp, cameraSpeed);
+
+            if (upPressed) {
+                cameraPos = Vec3.add(cameraPos, forward);
+            } else if (downPressed) {
+                cameraPos = Vec3.sub(cameraPos, forward);
+            }
+
+            if (rightPressed) {
+                cameraPos = Vec3.add(cameraPos, right);
+            } else if (leftPressed) {
+                cameraPos = Vec3.sub(cameraPos, right);
+            }
+
+            if (spacePressed) {
+                cameraPos = Vec3.add(cameraPos, up)
+            }
+
+        }
+
+        function updateVelocityY() {
+
+            let isGrounded = testGround();
+
+            if (isGrounded && player.velocity[1] < 0) {
+                player.velocity[1] = 0;
+            }
+
+            if (spacePressed && isGrounded) {
+                player.velocity[1] = player.jump;
+            }
+
+            if (!isGrounded) {
+                player.velocity[1] -= gravity;
+                if (player.velocity[1] < 0) {
+                    player.velocity[1] = Math.min(player.velocity[1], player.maxfall);
+                }
+            }
+        }
+
+        function characterMove(movement = [0, 0, 0]) {
+            let newPosition = Vec3.add(player.position, movement);
+            if (!testPlayerCollision(newPosition)) {
+                player.position = newPosition;
+            } else {
+                player.velocity = Vec3.copy(Vec3.zero);
+            }
+        }
+
+        function updateCamera() {
+            cameraPos[0] = player.position[0];
+            cameraPos[1] = player.position[1] + player.eye;
+            cameraPos[2] = player.position[2];
+        }
+
+        function moveCameraGamemode() {
+
+            let forward = Vec3.copy(cameraFront);
+            forward[1] = 0;
+            forward = Vec3.normalize(forward);
+            let right = Vec3.normalize(Vec3.cross(forward, cameraUp));
+
+            const lerp = (min, max, x) => min + x * (max - min);
+            const lerp3 = (min, max, x) => [
+                lerp(min[0], max[0], x),
+                lerp(min[1], max[1], x),
+                lerp(min[2], max[2], x)
+            ];
+
+            let target = [0, 0, 0];
+            if (upPressed) {
+                target = Vec3.add(target, forward);
+            } else if (downPressed) {
+                target = Vec3.sub(target, forward);
+            }
+
+            if (rightPressed) {
+                target = Vec3.add(target, right);
+            } else if (leftPressed) {
+                target = Vec3.sub(target, right);
+            }
+
+            if (!Vec3.isZero(target)) {
+                target = Vec3.normalize(target);
+            }
+            target = Vec3.scale(target, player.maxspeed);
+
+            const movementSharpness = 0.15;
+            // quick & dirty damping
+            //player.velocity = lerp3(player.velocity, target, movementSharpness);
+            player.velocity[0] = lerp(player.velocity[0], target[0], movementSharpness);
+            player.velocity[2] = lerp(player.velocity[2], target[2], movementSharpness);
+            updateVelocityY();
+            characterMove(player.velocity);
+            updateCamera();
+        }
+
+
+        /*
+            Rendering System.
+        */
+
+        function getShader(name) {
+            let sourceElement = document.getElementById(name);
+            let type = sourceElement.type == "x-shader/x-fragment" ? gl.FRAGMENT_SHADER : gl.VERTEX_SHADER;
+            let shader = gl.createShader(type)
+            gl.shaderSource(shader, sourceElement.text);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                output("error shader: " + gl.getShaderInfoLog(shader));
+                return null;
+            }
+
+            return shader;
+        }
+
+        function compileProgram(name) {
+            let frag = getShader(name + "-fs");
+            let vert = getShader(name + "-vs");
+
+            let program = gl.createProgram();
+            gl.attachShader(program, vert);
+            gl.attachShader(program, frag);
+            gl.linkProgram(program);
+
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                output("can't init shader");
+            }
+
+            return program;
+        }
+
+        function initWebgl() {
+            gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+            gl.clearColor(0.133, 0.137, 0.137, 1.0);
+            gl.enable(gl.DEPTH_TEST);
+            //gl.enable(gl.CULL_FACE);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            perspectiveMatrix = new Mat4x4();
+            perspectiveMatrix.perspective(fov, aspect, near, far);
+        }
+
+        function createBufferMesh(meshId) {
+            let buffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+
+            let bufferData = geoPrimitives[meshId].data;
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bufferData), gl.STATIC_DRAW);
+
+            buffers[meshId] = buffer;
+        }
+
+        function loadScene() {
+
+            const cubeY = 5;
+            const sparse = 6;
+            let cubePositions = [
+                sparse * 0.0, cubeY + 0.0, sparse * 0.0,
+                sparse * 2.0, cubeY + 5.0, sparse * -15.0,
+                sparse * 2.0, cubeY + 5.0, -15.0,
+                sparse * -1.5, cubeY + -2.2, sparse * -2.5,
+                sparse * -3.8, cubeY + -2.0, sparse * -12.3,
+                sparse * 2.4, cubeY + -0.4, sparse * -3.5,
+                sparse * -1.7, cubeY + 3.0, sparse * -7.5,
+                sparse * 1.3, cubeY + -2.0, sparse * -2.5,
+                sparse * 1.5, cubeY + 2.0, sparse * -2.5,
+                sparse * 1.5, cubeY + 0.2, sparse * -1.5,
+                sparse * -1.3, cubeY + 1.0, sparse * -1.5
+            ];
+
+            let points = [];
+            const dataVertices = geoPrimitives[scene[0].mesh].data;
+            // discard normals
+            for (let i = 0; i < dataVertices.length / 6; i++) {
+                points.push(dataVertices[6 * i + 0]);
+                points.push(dataVertices[6 * i + 1]);
+                points.push(dataVertices[6 * i + 2]);
+            }
+            const aabb = Physics.computeAABB(points);
+
+            const axis = Vec3.normalize([1, 0.3, 0.5]);
+            for (let i = 1; i < 10; i++) {
+                let objCube = structuredClone(scene[0]);
+
+                if (buffers[objCube.mesh] == null) {
+                    createBufferMesh(objCube.mesh);
+                }
+
+                objCube.name += i;
+                objCube.transform.translate = cubePositions.slice(i * 3, i * 3 + 3);
+                //objCube.transform.rotate[0] = radians(20.0 * i);
+                //objCube.transform.rotate[1] = axis;
+                objCube.aabb = aabb;
+
+                scene.push(objCube);
+            }
+            scene[0].name += "0";
+            scene[0].transform.translate[1] += cubeY;
+            scene[0].aabb = aabb;
+
+            scene.push({
+                name: "plane.001",
+                mesh: "quad",
+                transform: { translate: [0, 0, 0], rotate: [radians(90), Vec3.left], scale: [100, 100, 100] },
+                material: { color: [.941, .165, .041] },
+                aabb: null
+            });
+            createBufferMesh("quad");
+
+            defaultMaterial = compileProgram("default");
+            gl.useProgram(defaultMaterial);
+
+            /*var texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 255, 255]));
+
+            var image = new Image();
+            image.src = "assets2/container.jpg";
+            image.addEventListener("load", function () {
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+                gl.generateMipmap(gl.TEXTURE_2D);
+            });*/
+        }
+
+        function loadBuffer(meshId) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffers[meshId]);
+
+            vertexPositionAttribute = gl.getAttribLocation(defaultMaterial, "aVertexPosition");
+            gl.enableVertexAttribArray(vertexPositionAttribute);
+            gl.vertexAttribPointer(vertexPositionAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 0);
+
+            vertexColorAttribute = gl.getAttribLocation(defaultMaterial, "aNormal");
+            gl.enableVertexAttribArray(vertexColorAttribute);
+            gl.vertexAttribPointer(vertexColorAttribute, 3, gl.FLOAT, false, 6 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+
+            /*vertexColorAttribute = gl.getAttribLocation(defaultMaterial, "aUV");
+            gl.enableVertexAttribArray(vertexColorAttribute);
+            gl.vertexAttribPointer(vertexColorAttribute, 2, gl.FLOAT, false, 5 * Float32Array.BYTES_PER_ELEMENT, 3 * Float32Array.BYTES_PER_ELEMENT);
+            */
+        }
+
+        function draw() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            //var current = new Date().getTime();
+            //var elapsedTime = (current - startGlobalTime)/ 1000.0;
+            let elapsedTime = frames / fps;
+
+            let view = new Mat4x4();
+            /*
+            let radius = 15;
+            let x = radius * Math.cos(elapsedTime);
+            let z = radius * Math.sin(elapsedTime);
+            view.lookAt([x, 1.5, z], Vec3.zero, Vec3.up);
+            */
+            view.lookAt(cameraPos, Vec3.add(cameraPos, cameraFront), Vec3.up);
+
+            //gl.uniform1f(gl.getUniformLocation(defaultMaterial, "time"), elapsedTime);
+            gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "view"), false, view.get());
+            gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "projection"), false, perspectiveMatrix.get());
+            //gl.uniform1i(gl.getUniformLocation(defaultMaterial, "uTexture"), 0);
+
+            let lastMesh = "";
+            let m = new Mat4x4();
+            for (const obj of scene) {
+
+                if (obj.mesh != lastMesh) {
+                    loadBuffer(obj.mesh);
+                }
+
+                m.fromIdentity(
+                ).scale(
+                    obj.transform.scale[0],
+                    obj.transform.scale[1],
+                    obj.transform.scale[2]
+                ).rotate(
+                    obj.transform.rotate[0],
+                    obj.transform.rotate[1]
+                ).translate(
+                    obj.transform.translate[0],
+                    obj.transform.translate[1],
+                    obj.transform.translate[2]
+                );
+
+                let invModel = m.getInverse(Mat4x4.BYPASS_EXCEPTION).getTranspose();
+
+                gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "model"), false, m.get());
+                gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "invModel"), false, invModel.get());
+
+                gl.uniform3f(gl.getUniformLocation(defaultMaterial, "color"), obj.material.color[0], obj.material.color[1], obj.material.color[2]);
+
+
+                let mode = geoPrimitives[obj.mesh].mode;
+                gl.drawArrays(drawMode[mode], 0, geoPrimitives[obj.mesh].count);
+            }
+        }
+
+        function update() {
+            handleInputs();
+        }
+
+        function frame() {
+            if (!paused) {
+                frames++;
+                $("#frames").innerHTML = (frames / fps).toFixed(2);
+
+                update();
+                draw();
+            }
+
+            window.requestAnimationFrame(frame);
+        }
+
+
+        initInputs();
+        initWebgl();
+        loadScene();
+        window.requestAnimationFrame(frame);
+
+    </script>
+</body>
+
+</html>
