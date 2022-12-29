@@ -132,9 +132,9 @@
             v(t) = v0 - g * t
             x(t) = x0 + v0*t - g * 1/2 * t * t
 
-            -- euler implicit
+            -- euler semi-implicit (symplectic)
             y' = f(t,y)
-            y = y0 + f(t1,y1)*(t-t0)
+            y1 = y0 + f(t1,y1)*(t1-t0)
 
             a(t) = -g
             v(t) = v(t-1) + a(t)*dt
