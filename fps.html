@@ -308,7 +308,7 @@
 
             const tmax = 0.5;
             for (const position of aabbBottomPositions) {
-                if(raycastScene(position, Vec3.down, tmax)) {
+                if (raycastScene(position, Vec3.down, tmax)) {
                     return true;
                 }
             }
@@ -454,18 +454,10 @@
             forward = Vec3.normalize(forward);
             let right = Vec3.normalize(Vec3.cross(forward, cameraUp));
 
-            let target = [0, 0, 0];
-            if (upPressed) {
-                target = Vec3.add(target, forward);
-            } else if (downPressed) {
-                target = Vec3.sub(target, forward);
-            }
-
-            if (rightPressed) {
-                target = Vec3.add(target, right);
-            } else if (leftPressed) {
-                target = Vec3.sub(target, right);
-            }
+            let target = Vec3.add(
+                Vec3.scale(right, (Number(rightPressed) - Number(leftPressed))),
+                Vec3.scale(forward, (Number(upPressed) - Number(downPressed)))
+            );
 
             if (!Vec3.isZero(target)) {
                 target = Vec3.normalize(target);
