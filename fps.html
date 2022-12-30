@@ -66,7 +66,7 @@
             
             vec3 light = normalize(vec3(1));
             float dotNL = dot(light, normalize(normal));
-            dotNL = .5*dotNL+.5;
+            dotNL = .5 * dotNL + .5;
             vec3 color = vec3(.05) + color * dotNL;
             color = clamp(color, vec3(0), vec3(1));
             color = sqrt(color);
@@ -96,14 +96,14 @@
         var canvas = $("#canvas");
         var gl = canvas.getContext("webgl");
 
-        let width = 320, height = 280;
+        const width = 320, height = 280;
         let pixelRatio = window.devicePixelRatio;
         canvas.width = width * pixelRatio;
         canvas.height = height * pixelRatio;
         canvas.style.width = `${width}px`;
         canvas.style.height = `${height}px`;
 
-        var drawMode = {
+        const drawMode = {
             "triangles": gl.TRIANGLES,
             "triangle_strip": gl.TRIANGLE_STRIP
         }
@@ -141,9 +141,12 @@
         var perspectiveMatrix = null;
 
         // Player
-        let player = {
+        var playerState = {
             position: [0, 0, 0],
-            velocity: [0, 0, 0],
+            velocity: [0, 0, 0]
+        };
+
+        const playerConstants = {
             jump: 0.7,
             maxspeed: 0.4,
             maxfall: -0.02,
@@ -152,6 +155,7 @@
         };
 
         const gravity = 0.03;
+        const groundlevel = 0;
 
         // Globals
         var cvar = { flymode: 0, paused: false };
@@ -160,7 +164,7 @@
 
         var defaultMaterial = null;
 
-        // Scene definition - simple array, no hierarchy
+        // Scene - simple array, no hierarchy
         var scene = [{
             name: "cube.00",
             mesh: "cube",
@@ -268,7 +272,7 @@
             return Infinity;
         }
 
-        function raycastScene(origin, direction, tmax, resultObject = { t: 0, object: null }) {
+        function raycastScene(origin, direction, tmax, resultObject = { t: Infinity, object: null }) {
             let hitobject = null;
             let t = Infinity;
             for (const object of scene) {
@@ -290,30 +294,23 @@
 
         function testGround() {
 
-            if (player.position[1] < 0) {
+            if (playerState.position[1] <= groundlevel) {
                 return true;
             }
 
-            // test the 4x corners of the bounding box, so it matches the aabb collision tests
-            let frontLeft = Vec3.add(player.position, [player.aabb[0][0], 0, player.aabb[0][2]]);
-            let frontRight = Vec3.add(player.position, [-player.aabb[0][0], 0, player.aabb[0][2]]);
-            let rearLeft = Vec3.add(player.position, [player.aabb[0][0], 0, -player.aabb[0][2]]);
-            let rearRight = Vec3.add(player.position, [-player.aabb[0][0], 0, -player.aabb[0][2]]);
+            // test the 4x corners of the bounding box (+center), so it matches the aabb collision tests
+            let aabbBottomPositions = [];
+            aabbBottomPositions.push(playerState.position);
+            aabbBottomPositions.push(Vec3.add(playerState.position, [playerConstants.aabb[0][0], 0, playerConstants.aabb[0][2]]));
+            aabbBottomPositions.push(Vec3.add(playerState.position, [-playerConstants.aabb[0][0], 0, playerConstants.aabb[0][2]]));
+            aabbBottomPositions.push(Vec3.add(playerState.position, [playerConstants.aabb[0][0], 0, -playerConstants.aabb[0][2]]));
+            aabbBottomPositions.push(Vec3.add(playerState.position, [-playerConstants.aabb[0][0], 0, -playerConstants.aabb[0][2]]));
 
-            if (raycastScene(player.position, Vec3.down, 0.5)) {
-                return true;
-            }
-            if (raycastScene(frontLeft, Vec3.down, 0.5)) {
-                return true;
-            }
-            if (raycastScene(frontRight, Vec3.down, 0.5)) {
-                return true;
-            }
-            if (raycastScene(rearLeft, Vec3.down, 0.5)) {
-                return true;
-            }
-            if (raycastScene(rearRight, Vec3.down, 0.5)) {
-                return true;
+            const tmax = 0.5;
+            for (const position of aabbBottomPositions) {
+                if(raycastScene(position, Vec3.down, tmax)) {
+                    return true;
+                }
             }
 
             return false;
@@ -335,8 +332,8 @@
 
             let playerAABB = [];
 
-            playerAABB[0] = Vec3.add(player.aabb[0], position);
-            playerAABB[1] = Vec3.add(player.aabb[1], position);
+            playerAABB[0] = Vec3.add(playerConstants.aabb[0], position);
+            playerAABB[1] = Vec3.add(playerConstants.aabb[1], position);
 
             for (const obj of scene) {
                 if (obj.aabb != null) {
@@ -406,48 +403,48 @@
 
         function updateVelocityY() {
 
-            let isGrounded = testGround();
+            let grounded = testGround();
 
-            if (isGrounded && player.velocity[1] < 0) {
-                player.velocity[1] = 0;
+            if (grounded && playerState.velocity[1] < 0) {
+                playerState.velocity[1] = 0;
             }
 
             if (spacePressed && (frames - jumpCooldown.last) > jumpCooldown.threshold) {
                 jumpCooldown.last = frames;
-                if (isGrounded) {
-                    player.velocity[1] = player.jump;
+                if (grounded) {
+                    playerState.velocity[1] = playerConstants.jump;
                 }
             }
 
-            if (!isGrounded) {
-                player.velocity[1] -= gravity;
-                if (player.velocity[1] < 0) {
-                    player.velocity[1] = Math.min(player.velocity[1], player.maxfall);
+            if (!grounded) {
+                playerState.velocity[1] -= gravity;
+                if (playerState.velocity[1] < 0) {
+                    playerState.velocity[1] = Math.min(playerState.velocity[1], playerConstants.maxfall);
                 }
             }
         }
 
         function characterMove(movement = [0, 0, 0]) {
-            let newPosition = Vec3.add(player.position, movement);
+            let newPosition = Vec3.add(playerState.position, movement);
             if (!testPlayerCollision(newPosition)) {
-                player.position = newPosition;
+                playerState.position = newPosition;
             } else {
                 // still apply gravity,
                 // XXX TODO: but should also allow jumping if the player is applying motion into the AABB colliders
                 if (movement[1] < 0) {
-                    player.position[1] += movement[1];
-                    player.velocity[0] = 0;
-                    player.velocity[2] = 0;
+                    playerState.position[1] += movement[1];
+                    playerState.velocity[0] = 0;
+                    playerState.velocity[2] = 0;
                 } else {
-                    player.velocity = Vec3.copy(Vec3.zero);
+                    playerState.velocity = Vec3.copy(Vec3.zero);
                 }
             }
         }
 
         function updateCamera() {
-            cameraPos[0] = player.position[0];
-            cameraPos[1] = player.position[1] + player.eye;
-            cameraPos[2] = player.position[2];
+            cameraPos[0] = playerState.position[0];
+            cameraPos[1] = playerState.position[1] + playerConstants.eye;
+            cameraPos[2] = playerState.position[2];
         }
 
         function moveCameraGamemode() {
@@ -473,15 +470,15 @@
             if (!Vec3.isZero(target)) {
                 target = Vec3.normalize(target);
             }
-            target = Vec3.scale(target, player.maxspeed);
+            target = Vec3.scale(target, playerConstants.maxspeed);
 
             const movementSharpness = 0.15;
             // quick & dirty damping
             const lerp = (min, max, x) => min + x * (max - min);
-            player.velocity[0] = lerp(player.velocity[0], target[0], movementSharpness);
-            player.velocity[2] = lerp(player.velocity[2], target[2], movementSharpness);
+            playerState.velocity[0] = lerp(playerState.velocity[0], target[0], movementSharpness);
+            playerState.velocity[2] = lerp(playerState.velocity[2], target[2], movementSharpness);
             updateVelocityY();
-            characterMove(player.velocity);
+            characterMove(playerState.velocity);
             updateCamera();
         }
 
@@ -546,15 +543,15 @@
 
             let cubePositions = [
                 0.0, 5.0, 0.0, //cube.000
-                12.0,  11.0, -65.0, //cube.001
-                12.0,  11.0, -15.0, //cube.002
+                12.0, 11.0, -65.0, //cube.001
+                12.0, 11.0, -15.0, //cube.002
                 -9, 2, -14, //cube.003
                 -24, 3.0, -30, //cube.004
-                14,  5.4, -20, //cube.005
+                14, 5.4, -20, //cube.005
                 -10, 8.0, -35, //cube.006
-                6,  3.0, -13, //cube.007
-                18,  7.0, -15, //cube.008
-                24,  5.2, -8, //cube.009
+                6, 3.0, -13, //cube.007
+                18, 7.0, -15, //cube.008
+                24, 5.2, -8, //cube.009
             ];
 
             let points = [];
@@ -567,7 +564,6 @@
             }
             const aabb = Physics.computeAABB(points);
 
-            const axis = Vec3.normalize([1, 0.3, 0.5]);
             for (let i = 1; i < cubePositions.length / 3; i++) {
                 let objCube = structuredClone(scene[0]);
 
@@ -588,7 +584,7 @@
             scene.push({
                 name: "plane.001",
                 mesh: "quad",
-                transform: { translate: [0, 0, 0], rotate: [radians(90), Vec3.left], scale: [100, 100, 100] },
+                transform: { translate: [0, groundlevel, 0], rotate: [radians(90), Vec3.left], scale: [100, 100, 100] },
                 material: { color: [.941, .165, .041] },
                 aabb: null
             });
