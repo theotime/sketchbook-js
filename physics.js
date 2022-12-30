@@ -37,14 +37,14 @@ class Physics {
     }
 
     /*
-        Ray-AABB intersection in 3D.
+        Line AABB intersection in 3D.
         Ref: https://tavianator.com/2011/ray_box.html
 
         origin, direction: [x, y, z]
         aabb: [[x, y, z], [x, y, z]]
         return [tmin, tmax]
     */
-    static raycastAABB(origin, direction, aabb, result) {
+    static intersectLineAABB(origin, direction, aabb, result) {
         let tmin = -Infinity, tmax = Infinity;
 
         for (let i = 0; i < 3; i++) {

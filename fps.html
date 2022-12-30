@@ -244,34 +244,44 @@
             Collisions helpers.
         */
 
-        function raycastScene(origin, direction, tmax, resultObj = { t: 0, obj: null }) {
+        // return minimum distance to the dynamic object or Infinity if no intersection
+        function raycastObject(origin, direction, tmax, object) {
+            if (object.aabb == null) {
+                return Infinity;
+            }
+
+            let aabb = [[], []];
+            for (let i = 0; i < 3; i++) {
+                aabb[0][i] = object.aabb[0][i] * object.transform.scale[i] + object.transform.translate[i];
+                aabb[1][i] = object.aabb[1][i] * object.transform.scale[i] + object.transform.translate[i];
+            }
+
+            let result = [];
+            if (Physics.intersectLineAABB(origin, direction, aabb, result)) {
+                // discard negative intersections (object is behind the origin)
+                // discard intersections superior to allowed tmax
+                if (result[0] >= 0 && result[0] < tmax) {
+                    return result[0];
+                }
+            }
+
+            return Infinity;
+        }
+
+        function raycastScene(origin, direction, tmax, resultObject = { t: 0, object: null }) {
             let hitobject = null;
             let t = Infinity;
-            for (const obj of scene) {
-                if (obj.aabb != null) {
-                    let result = [];
-                    let aabb = [[], []];
-                    for (let i = 0; i < 3; i++) {
-                        aabb[0][i] = obj.aabb[0][i] * obj.transform.scale[i] + obj.transform.translate[i];
-                        aabb[1][i] = obj.aabb[1][i] * obj.transform.scale[i] + obj.transform.translate[i];
-                    }
-
-                    if (Physics.raycastAABB(origin, direction, aabb, result)) {
-                        // discard negative intersections (object is behind the origin)
-                        // discard intersections superior to allowed tmax
-                        if (result[0] >= 0 && result[0] < tmax) {
-                            if (result[0] < t) {
-                                t = result[0];
-                                hitobject = obj;
-                            }
-                        }
-                    }
+            for (const object of scene) {
+                let tresult = raycastObject(origin, direction, tmax, object);
+                if (tresult < t) {
+                    t = tresult;
+                    hitobject = object;
                 }
             }
 
             if (t != Infinity) {
-                resultObj.t = t;
-                resultObj.obj = hitobject;
+                resultObject.t = t;
+                resultObject.object = hitobject;
                 return true;
             }
 
@@ -357,7 +367,7 @@
                 //console.log("FIRE");
                 let result = { t: 0, obj: null };
                 if (raycastScene(cameraPos, cameraFront, 50, result)) {
-                    output("We hit " + result.obj.name);
+                    output("We hit " + result.object.name);
                 }
             }
 
