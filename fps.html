@@ -116,6 +116,10 @@
             threshold: 10,//frames
             last: 0,
         };
+        var jumpCooldown = {
+            threshold: 25,//frames
+            last: 0,
+        };
 
 
         // Parameters
@@ -253,9 +257,13 @@
                     }
 
                     if (Physics.raycastAABB(origin, direction, aabb, result)) {
-                        if (result[0] < t && result[0] < tmax) {
-                            t = result[0];
-                            hitobject = obj;
+                        // discard negative intersections (object is behind the origin)
+                        // discard intersections superior to allowed tmax
+                        if (result[0] >= 0 && result[0] < tmax) {
+                            if (result[0] < t) {
+                                t = result[0];
+                                hitobject = obj;
+                            }
                         }
                     }
                 }
@@ -394,8 +402,11 @@
                 player.velocity[1] = 0;
             }
 
-            if (spacePressed && isGrounded) {
-                player.velocity[1] = player.jump;
+            if (spacePressed && (frames - jumpCooldown.last) > jumpCooldown.threshold) {
+                jumpCooldown.last = frames;
+                if (isGrounded) {
+                    player.velocity[1] = player.jump;
+                }
             }
 
             if (!isGrounded) {
@@ -411,7 +422,15 @@
             if (!testPlayerCollision(newPosition)) {
                 player.position = newPosition;
             } else {
-                player.velocity = Vec3.copy(Vec3.zero);
+                // still apply gravity,
+                // XXX TODO: but should allow jumping if the player is applying motion into the wall
+                if (movement[1] < 0) {
+                    player.position[1] += movement[1];
+                    player.velocity[0] = 0;
+                    player.velocity[2] = 0;
+                } else {
+                    player.velocity = Vec3.copy(Vec3.zero);
+                }
             }
         }
 
@@ -427,13 +446,6 @@
             forward[1] = 0;
             forward = Vec3.normalize(forward);
             let right = Vec3.normalize(Vec3.cross(forward, cameraUp));
-
-            const lerp = (min, max, x) => min + x * (max - min);
-            const lerp3 = (min, max, x) => [
-                lerp(min[0], max[0], x),
-                lerp(min[1], max[1], x),
-                lerp(min[2], max[2], x)
-            ];
 
             let target = [0, 0, 0];
             if (upPressed) {
@@ -455,7 +467,7 @@
 
             const movementSharpness = 0.15;
             // quick & dirty damping
-            //player.velocity = lerp3(player.velocity, target, movementSharpness);
+            const lerp = (min, max, x) => min + x * (max - min);
             player.velocity[0] = lerp(player.velocity[0], target[0], movementSharpness);
             player.velocity[2] = lerp(player.velocity[2], target[2], movementSharpness);
             updateVelocityY();
@@ -558,8 +570,6 @@
 
                 objCube.name += i;
                 objCube.transform.translate = cubePositions.slice(i * 3, i * 3 + 3);
-                //objCube.transform.rotate[0] = radians(20.0 * i);
-                //objCube.transform.rotate[1] = axis;
                 objCube.aabb = aabb;
 
                 scene.push(objCube);
@@ -613,20 +623,11 @@
         function draw() {
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            //var current = new Date().getTime();
-            //var elapsedTime = (current - startGlobalTime)/ 1000.0;
             let elapsedTime = frames / fps;
 
             let view = new Mat4x4();
-            /*
-            let radius = 15;
-            let x = radius * Math.cos(elapsedTime);
-            let z = radius * Math.sin(elapsedTime);
-            view.lookAt([x, 1.5, z], Vec3.zero, Vec3.up);
-            */
             view.lookAt(cameraPos, Vec3.add(cameraPos, cameraFront), Vec3.up);
 
-            //gl.uniform1f(gl.getUniformLocation(defaultMaterial, "time"), elapsedTime);
             gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "view"), false, view.get());
             gl.uniformMatrix4fv(gl.getUniformLocation(defaultMaterial, "projection"), false, perspectiveMatrix.get());
             //gl.uniform1i(gl.getUniformLocation(defaultMaterial, "uTexture"), 0);
