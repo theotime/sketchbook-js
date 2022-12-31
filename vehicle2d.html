@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Vehicle 2d
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <select name="mode" id="mode">
+        <option value="wheel" selected>Wheel</option>
+        <option value="antigrav">Antigrav</option>
+        <option value="steering">Steering</option>
+        <option value="simple">Simple</option>
+    </select>
+    <br><br>
+    <canvas id="canvas"></canvas>
+    <div>velX: <span id="velX">1.0</span> posX: <span id="posX">1.0</span> velY: <span id="velY">1.0</span> posY: <span
+            id="posY">1.0</span> angle: <span id="angle">0.0</span> </div>
+    <script>
+
+        /*
+            Various models for a top-down 2D vehicle controller.
+        */
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 512, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+
+        // Inputs
+        let upPressed, downPressed, leftPressed, rightPressed;
+        let keyboardEnum = { left: 37, up: 38, right: 39, down: 40 };
+        var pointerPosition = [0, 0];
+
+        // Vec2 helpers
+        const Vec2 = {
+            zero: [0, 0],
+            up: [0, 1],
+            down: [0, -1],
+            left: [-1, 0],
+            right: [1, 0],
+
+            isZero: (v) => v[0] == 0 && v[1] == 0,
+            copy: (v) => [...v],
+            neg: (v) => [-v[0], -v[1]],
+            add: (v1, v2) => [v1[0] + v2[0], v1[1] + v2[1]],
+            sub: (v1, v2) => [v1[0] - v2[0], v1[1] - v2[1]],
+            scale: (v, s) => [v[0] * s, v[1] * s],
+            dot: (v1, v2) => v1[0] * v2[0] + v1[1] * v2[1],
+            length: (v) => Math.sqrt(Vec2.dot(v, v)),
+            normalize: (v) => {
+                let len = Vec2.length(v);
+                return [v[0] / len, v[1] / len]
+            },
+            toAngle: (v) => v[1] > 0 ? Math.PI / 2 - Math.acos(v[0]) : Math.PI / 2 + Math.acos(v[0]),
+            toForward: (a) => [Math.cos(a - Math.PI / 2), -1 * Math.sin(a - Math.PI / 2)],
+            toRight: (a) => [Math.cos(a - Math.PI), -1 * Math.sin(a - Math.PI)]
+        };
+
+        // Entity
+        let player = {
+            position: [width / 2, height / 2],
+            velocity: Vec2.copy(Vec2.zero),
+            angle: Vec2.toAngle(Vec2.down),
+            size: [16, 32],
+            wheelBase: 16 * 2
+        };
+
+        const modeSelectElement = document.querySelector("#mode");
+        var mode = modeSelectElement.value;
+
+
+
+        /*
+            Inputs.
+        */
+
+        const keyDownHandler = event => keyHandler(event, true);
+        const keyUpHandler = event => keyHandler(event, false);
+        function keyHandler(event, state) {
+            if (event.keyCode == keyboardEnum.right) {
+                rightPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.left) {
+                leftPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.down) {
+                downPressed = state;
+            }
+            if (event.keyCode == keyboardEnum.up) {
+                upPressed = state;
+            }
+        }
+
+        // Aligned with the 2D canvas axis
+        const inputAxis = () => [Number(rightPressed) - Number(leftPressed), Number(upPressed) - Number(downPressed)];
+        // Flipped y-axis
+        const inputFlippedYAxis = () => [Number(rightPressed) - Number(leftPressed), Number(downPressed) - Number(upPressed)];
+
+
+        /*
+            Game controllers.
+        */
+
+        // http://engineeringdotnet.blogspot.com/2010/04/simple-2d-car-physics-in-games.html?m=1
+        function wheelModel() {
+
+            const friction = 0.9;
+            const maxspeed = 0.3;
+
+            let input = inputAxis();
+
+            const carSpeed = maxspeed * input[1];
+
+            player.velocity[1] = player.velocity[1] * friction + carSpeed
+            //player.velocity[1] = carSpeed;
+
+            const speedAngle = 0.05;
+            const steerAngle = -speedAngle * input[0]; // anticlock-wise, negative angle = to the right
+
+            player.velocity[0] = player.velocity[0] * friction + steerAngle;
+            //player.velocity[0] = steerAngle;
+
+            const forward = Vec2.toForward(player.angle);
+            const steering = Vec2.toForward(player.angle + player.velocity[0]);
+
+            let frontWheel = Vec2.add(player.position, Vec2.scale(forward, player.wheelBase / 2));
+            let backWheel = Vec2.sub(player.position, Vec2.scale(forward, player.wheelBase / 2));
+
+            backWheel = Vec2.add(backWheel, Vec2.scale(forward, player.velocity[1]));
+            frontWheel = Vec2.add(frontWheel, Vec2.scale(steering, player.velocity[1]));
+
+            player.position = Vec2.add(
+                Vec2.scale(frontWheel, 0.5),
+                Vec2.scale(backWheel, 0.5),
+            );
+
+            player.angle = Math.PI / 2 - Math.atan2(frontWheel[1] - backWheel[1], frontWheel[0] - backWheel[0]);
+        }
+
+        function antigravModel() {
+
+            const friction = 0.9;
+            const maxspeed = 0.3;
+
+            let input = inputAxis();
+
+            const carSpeed = maxspeed * Math.max(0, input[1]);
+
+            player.velocity[1] = player.velocity[1] * friction + carSpeed;
+
+            const speedAngle = 0.005;
+            const steerAngle = -speedAngle * input[0]; // anticlock-wise, negative angle = to the right
+
+            player.velocity[0] = player.velocity[0] * friction + steerAngle;
+            //player.velocity[0] = steerAngle;
+
+            const forward = Vec2.toForward(player.angle);
+            const steering = Vec2.toForward(player.angle + player.velocity[0]);
+
+            player.position = Vec2.add(player.position, Vec2.scale(forward, player.velocity[1]));
+
+            let newForward = Vec2.add(forward, steering);
+            if (!Vec2.isZero(newForward)) {
+                player.angle = Vec2.toAngle(Vec2.normalize(newForward));
+            } else {
+                player.angle = Vec2.toAngle(Vec2.down);
+            }
+        }
+
+        // Mouse controlled 
+        function steeringModel() {
+            const maxspeed = 3;
+            const mass = 0.2;
+
+            let desired = Vec2.sub(pointerPosition, player.position);
+
+            if (!Vec2.isZero(desired)) {
+                desired = Vec2.normalize(desired);
+            }
+            desired = Vec2.scale(desired, maxspeed);
+
+            let steer = Vec2.sub(desired, player.velocity);
+
+            // acceleration
+            let force = Vec2.scale(steer, mass); // mass
+            player.velocity = Vec2.add(player.velocity, force);
+
+            if (Vec2.length(player.velocity) > maxspeed) {
+                player.velocity = Vec2.normalize(player.velocity);
+                player.velocity = Vec2.scale(player.velocity, maxspeed);
+            }
+
+            if (!Vec2.isZero(player.velocity)) {
+                player.angle = Vec2.toAngle(Vec2.normalize(player.velocity));
+            } else {
+                player.angle = Vec2.toAngle([0, 1]);
+            }
+
+            player.position = Vec2.add(player.position, player.velocity);
+        }
+
+        function simpleModel() {
+            const speed = 0.5;
+            const friction = 0.9;
+
+            let input = inputFlippedYAxis();
+            if (!Vec2.isZero(input)) {
+                input = Vec2.normalize(input);
+                player.angle = Vec2.toAngle(input);
+            } else {
+                player.angle = Vec2.toAngle(Vec2.down);
+            }
+
+            // acceleration
+            let velocity = Vec2.scale(player.velocity, friction);
+            let force = Vec2.scale(input, speed);
+            player.velocity = Vec2.add(velocity, force);
+
+            player.position = Vec2.add(player.position, player.velocity);
+        }
+
+        // fixed update, fixed framerate (but not framerate indepedent)
+        // speed of the simulation change if you change the framerate
+        // increase or decrease update() calls updates faster or slower the simulation (player speed/position)
+        // add *dt(framerate) to make it indepedent
+        function update() {
+
+            switch (mode) {
+                case "wheel":
+                    wheelModel();
+                    break;
+                case "antigrav":
+                    antigravModel();
+                    break;
+                case "steering":
+                    steeringModel();
+                    break;
+                case "simple":
+                    simpleModel();
+                    break;
+            }
+
+        }
+
+
+        /*
+            Rendering.
+        */
+
+        function draw() {
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.save();
+
+            ctx.translate(player.position[0], player.position[1]);
+            ctx.rotate(-player.angle);
+
+            ctx.fillStyle = "tomato";
+            ctx.fillRect(-player.size[0] / 2, -player.size[1] / 2, player.size[0], player.size[1]);
+            ctx.fillStyle = "red";
+            const frontMarker = player.size[0] * 0.3;
+            ctx.fillRect(-frontMarker / 2, player.size[0], frontMarker, frontMarker);
+            ctx.restore();
+        }
+
+        function frame() {
+            update();
+            draw();
+
+            updateUI();
+
+            requestAnimationFrame(frame);
+        }
+
+        function updateUI() {
+            $("#posX").innerText = player.position[0].toFixed(2);
+            $("#posY").innerText = player.position[1].toFixed(2);
+            $("#velX").innerText = player.velocity[0].toFixed(2);
+            $("#velY").innerText = player.velocity[1].toFixed(2);
+            $("#angle").innerText = (player.angle * (180 / Math.PI)).toFixed(2);
+        }
+
+        upPressed = downPressed = leftPressed = rightPressed = false;
+        document.addEventListener("keydown", keyDownHandler, false);
+        document.addEventListener("keyup", keyUpHandler, false);
+
+        canvas.addEventListener("pointermove", (e) => {
+            let r = canvas.getBoundingClientRect();
+            pointerPosition = [e.clientX - r.left, e.clientY - r.top];
+        });
+
+        modeSelectElement.addEventListener("change", (e) => {
+            mode = modeSelectElement.value;
+            modeSelectElement.blur();
+        });
+
+        frame();
+
+    </script>
+</body>
+
+</html>
