@@ -70,9 +70,11 @@
                 let len = Vec2.length(v);
                 return [v[0] / len, v[1] / len]
             },
+            limit: (v, max) => Vec2.length(v) > max ? Vec2.scale(Vec2.normalize(v), max) : v,
+
+            // ref point: 0° = Vec2.up = [0, 1], angle orientation = anticlock-wise
             toAngle: (v) => v[1] > 0 ? Math.PI / 2 - Math.acos(v[0]) : Math.PI / 2 + Math.acos(v[0]),
-            toForward: (a) => [Math.cos(a - Math.PI / 2), -1 * Math.sin(a - Math.PI / 2)],
-            toRight: (a) => [Math.cos(a - Math.PI), -1 * Math.sin(a - Math.PI)]
+            fromAngle: (a) => [Math.sin(a), Math.cos(a)],
         };
 
         // Entity
@@ -139,8 +141,8 @@
             player.velocity[0] = player.velocity[0] * friction + steerAngle;
             //player.velocity[0] = steerAngle;
 
-            const forward = Vec2.toForward(player.angle);
-            const steering = Vec2.toForward(player.angle + player.velocity[0]);
+            const forward = Vec2.fromAngle(player.angle);
+            const steering = Vec2.fromAngle(player.angle + player.velocity[0]);
 
             let frontWheel = Vec2.add(player.position, Vec2.scale(forward, player.wheelBase / 2));
             let backWheel = Vec2.sub(player.position, Vec2.scale(forward, player.wheelBase / 2));
@@ -167,26 +169,26 @@
 
             player.velocity[1] = player.velocity[1] * friction + carSpeed;
 
-            const speedAngle = 0.005;
+            const speedAngle = 0.003;
             const steerAngle = -speedAngle * input[0]; // anticlock-wise, negative angle = to the right
 
             player.velocity[0] = player.velocity[0] * friction + steerAngle;
             //player.velocity[0] = steerAngle;
 
-            const forward = Vec2.toForward(player.angle);
-            const steering = Vec2.toForward(player.angle + player.velocity[0]);
+            const forward = Vec2.fromAngle(player.angle);
+            const steering = Vec2.fromAngle(player.angle + player.velocity[0]);
 
             player.position = Vec2.add(player.position, Vec2.scale(forward, player.velocity[1]));
 
-            let newForward = Vec2.add(forward, steering);
-            if (!Vec2.isZero(newForward)) {
-                player.angle = Vec2.toAngle(Vec2.normalize(newForward));
+            if (!Vec2.isZero(steering)) {
+                player.angle = Vec2.toAngle(Vec2.normalize(steering));
             } else {
                 player.angle = Vec2.toAngle(Vec2.down);
             }
         }
 
-        // Mouse controlled 
+        // Mouse controlled
+        // ex: https://natureofcode.com/book/chapter-6-autonomous-agents/
         function steeringModel() {
             const maxspeed = 3;
             const mass = 0.2;
@@ -201,18 +203,15 @@
             let steer = Vec2.sub(desired, player.velocity);
 
             // acceleration
-            let force = Vec2.scale(steer, mass); // mass
+            let force = Vec2.scale(steer, mass);
             player.velocity = Vec2.add(player.velocity, force);
 
-            if (Vec2.length(player.velocity) > maxspeed) {
-                player.velocity = Vec2.normalize(player.velocity);
-                player.velocity = Vec2.scale(player.velocity, maxspeed);
-            }
+            player.velocity = Vec2.limit(player.velocity, maxspeed);
 
             if (!Vec2.isZero(player.velocity)) {
                 player.angle = Vec2.toAngle(Vec2.normalize(player.velocity));
             } else {
-                player.angle = Vec2.toAngle([0, 1]);
+                player.angle = Vec2.toAngle(Vec2.down);
             }
 
             player.position = Vec2.add(player.position, player.velocity);
