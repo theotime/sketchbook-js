@@ -23,7 +23,7 @@
     <br><br>
     <canvas id="canvas"></canvas>
     <div>velX: <span id="velX">1.0</span> posX: <span id="posX">1.0</span> velY: <span id="velY">1.0</span> posY: <span
-            id="posY">1.0</span> angle: <span id="angle">0.0</span> </div>
+            id="posY">1.0</span> angle: <span id="angle">0.0</span> drift: <span id="drift">0.0</span> </div>
     <script>
 
         /*
@@ -46,8 +46,8 @@
 
 
         // Inputs
-        let upPressed, downPressed, leftPressed, rightPressed;
-        let keyboardEnum = { left: 37, up: 38, right: 39, down: 40 };
+        let upPressed, downPressed, leftPressed, rightPressed, leftTriggerPressed, rightTriggerPressed;
+        let keyboardEnum = { left: 37, up: 38, right: 39, down: 40, keya: 65, keyq: 81, keyd: 68, keye: 69 };
         var pointerPosition = [0, 0];
 
         // Vec2 helpers
@@ -82,6 +82,7 @@
             position: [width / 2, height / 2],
             velocity: Vec2.copy(Vec2.zero),
             angle: Vec2.toAngle(Vec2.down),
+            drift: 0,
             size: [16, 32],
             wheelBase: 16 * 2
         };
@@ -98,17 +99,27 @@
         const keyDownHandler = event => keyHandler(event, true);
         const keyUpHandler = event => keyHandler(event, false);
         function keyHandler(event, state) {
-            if (event.keyCode == keyboardEnum.right) {
-                rightPressed = state;
-            }
-            if (event.keyCode == keyboardEnum.left) {
-                leftPressed = state;
-            }
-            if (event.keyCode == keyboardEnum.down) {
-                downPressed = state;
-            }
-            if (event.keyCode == keyboardEnum.up) {
-                upPressed = state;
+            switch (event.keyCode) {
+                case keyboardEnum.right:
+                    rightPressed = state;
+                    break;
+                case keyboardEnum.left:
+                    leftPressed = state;
+                    break;
+                case keyboardEnum.down:
+                    downPressed = state;
+                    break;
+                case keyboardEnum.up:
+                    upPressed = state;
+                    break;
+                case keyboardEnum.keyq:
+                case keyboardEnum.keya:
+                    leftTriggerPressed = state;
+                    break;
+                case keyboardEnum.keyd:
+                case keyboardEnum.keye:
+                    rightTriggerPressed = state;
+                    break;
             }
         }
 
@@ -116,6 +127,7 @@
         const inputAxis = () => [Number(rightPressed) - Number(leftPressed), Number(upPressed) - Number(downPressed)];
         // Flipped y-axis
         const inputFlippedYAxis = () => [Number(rightPressed) - Number(leftPressed), Number(downPressed) - Number(upPressed)];
+        const inputTriggerAxis = () => Number(rightTriggerPressed) - Number(leftTriggerPressed);
 
 
         /*
@@ -175,10 +187,25 @@
             player.velocity[0] = player.velocity[0] * friction + steerAngle;
             //player.velocity[0] = steerAngle;
 
+            // braking/drift model inspired from: https://github.com/BKcore/HexGL/blob/master/bkcore/hexgl/ShipControls.js
+            const driftDamping = 0.95;
+            const brakeAngle = 0.004;
+            const brake = 0.02;
+            const driftAmount = 0.08;
+
+            const inputTrigger = inputTriggerAxis();
+            player.drift = player.drift * driftDamping;
+            player.drift -= driftAmount * inputTrigger;
+            player.velocity[0] -= brakeAngle * inputTrigger;
+            player.velocity[1] -= brake * Math.abs(inputTrigger);
+
             const forward = Vec2.fromAngle(player.angle);
             const steering = Vec2.fromAngle(player.angle + player.velocity[0]);
 
+            const right = Vec2.fromAngle(player.angle - Math.PI / 2);
+
             player.position = Vec2.add(player.position, Vec2.scale(forward, player.velocity[1]));
+            player.position = Vec2.add(player.position, Vec2.scale(right, player.drift));
 
             if (!Vec2.isZero(steering)) {
                 player.angle = Vec2.toAngle(Vec2.normalize(steering));
@@ -195,6 +222,10 @@
 
             let desired = Vec2.sub(pointerPosition, player.position);
 
+            const distanceFromTarget = Vec2.length(desired);
+            const decelerateRadius = 30;
+            const decelerateFactor = 0.93;
+
             if (!Vec2.isZero(desired)) {
                 desired = Vec2.normalize(desired);
             }
@@ -204,17 +235,21 @@
 
             // acceleration
             let force = Vec2.scale(steer, mass);
-            player.velocity = Vec2.add(player.velocity, force);
 
-            player.velocity = Vec2.limit(player.velocity, maxspeed);
+            if (distanceFromTarget > decelerateRadius) {
+                player.velocity = Vec2.add(player.velocity, force);
+                player.velocity = Vec2.limit(player.velocity, maxspeed);
+            } else {
+                player.velocity = Vec2.scale(player.velocity, decelerateFactor);
+            }
+
+            player.position = Vec2.add(player.position, player.velocity);
 
             if (!Vec2.isZero(player.velocity)) {
                 player.angle = Vec2.toAngle(Vec2.normalize(player.velocity));
             } else {
                 player.angle = Vec2.toAngle(Vec2.down);
             }
-
-            player.position = Vec2.add(player.position, player.velocity);
         }
 
         function simpleModel() {
@@ -224,17 +259,22 @@
             let input = inputFlippedYAxis();
             if (!Vec2.isZero(input)) {
                 input = Vec2.normalize(input);
-                player.angle = Vec2.toAngle(input);
+                //player.angle = Vec2.toAngle(input);
             } else {
-                player.angle = Vec2.toAngle(Vec2.down);
+                //player.angle = Vec2.toAngle(Vec2.down);
             }
 
             // acceleration
             let velocity = Vec2.scale(player.velocity, friction);
             let force = Vec2.scale(input, speed);
             player.velocity = Vec2.add(velocity, force);
-
             player.position = Vec2.add(player.position, player.velocity);
+
+            if (!Vec2.isZero(player.velocity)) {
+                player.angle = Vec2.toAngle(Vec2.normalize(player.velocity));
+            } else {
+                player.angle = Vec2.toAngle(Vec2.down);
+            }
         }
 
         // fixed update, fixed framerate (but not framerate indepedent)
@@ -297,9 +337,10 @@
             $("#velX").innerText = player.velocity[0].toFixed(2);
             $("#velY").innerText = player.velocity[1].toFixed(2);
             $("#angle").innerText = (player.angle * (180 / Math.PI)).toFixed(2);
+            $("#drift").innerText = player.drift.toFixed(2);
         }
 
-        upPressed = downPressed = leftPressed = rightPressed = false;
+        upPressed = downPressed = leftPressed = rightPressed = leftTriggerPressed = rightTriggerPressed = false;
         document.addEventListener("keydown", keyDownHandler, false);
         document.addEventListener("keyup", keyUpHandler, false);
 
