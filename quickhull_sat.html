@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Quickhull / SAT
+    </title>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <br>
+    <input id="undo" type="button" value="undo">
+    <input id="redo" type="button" value="redo">
+    <script>
+
+        /*
+            Implementation of Quickhull & Separating Axis Theorem
+
+            Refs:
+            https://en.wikipedia.org/wiki/Quickhull
+            https://dyn4j.org/2010/01/sat/
+        */
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+        let screenDiag = Math.sqrt(width * width + height * height);
+
+        var pointerPosition = null;
+        var pointerdownPosition = null;
+        var pictures = [];
+        var undo = [];
+
+        let randomBorderSize = 50;
+        let numRandomPoints = 9;
+        let randomPoints = [];
+        let randomHull = [];
+        var hullCentroid = { x: 0, y: 0 };
+
+        const equalPoints = (a, b) => a.x == b.x && a.y == b.y;
+
+        function generateRandomPoints(num, bordersize) {
+            const random = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
+
+            let points = [];
+            for (let i = 0; i < num; i++) {
+                points.push(
+                    {
+                        x: random(bordersize, width - bordersize),
+                        y: random(bordersize, height - bordersize)
+                    }
+                );
+            }
+
+            return points;
+        }
+
+
+        /*
+            QuickHull.
+        */
+
+        /*
+            Signed distance from a point to a line.
+            https://web.archive.org/web/20210507021429/https://geomalgorithms.com/a02-_lines.html
+
+            point: p (x,y)
+            line: p1 (x1,y1), p2 (x2,y2) 
+
+            w = p - p1
+            v = p2 - p1
+            
+            Cross-product (with z=0): Area(w,v) = d * |v| = |v x w|
+            
+            d = |v x w| / |v|
+            (vx*wy - vy*wx) / |v|
+            ((x2 - x1)*(y - y1) - (y2 - y1)*(x - x1)) / |v|
+            We can ignore |v|, as we use the distance for comparing values sharing the same vector v
+            
+            Don't return actual distance, but good enough for comparing
+        */
+        const sdLine = (p1, p2, p) => (p2.x - p1.x) * (p.y - p1.y) - (p2.y - p1.y) * (p.x - p1.x);
+        function quickhull(hull, points, p1, p2) {
+            let farestDist = -1;
+            let farestPoint;
+            let nonDiscardedPoints = [];
+            for (point of points) {
+                let d = sdLine(p1, p2, point);
+                if (d > 0) {
+                    nonDiscardedPoints.push(point);
+                    if (d > farestDist) {
+                        farestDist = d;
+                        farestPoint = point;
+                    }
+                }
+            }
+
+            if (farestDist != -1) {
+                hull.push(farestPoint);
+                quickhull(hull, nonDiscardedPoints, p1, farestPoint);
+                quickhull(hull, nonDiscardedPoints, farestPoint, p2);
+            }
+
+        }
+
+        function computeHull(points) {
+
+            // Start with QuickHull algorithm
+            let hull = [];
+            let min = { x: Infinity, y: Infinity }, max = { x: -Infinity, y: -Infinity };
+            for (const point of points) {
+                if (point.x < min.x) {
+                    min = point;
+                }
+                if (point.x > max.x) {
+                    max = point;
+                }
+            }
+
+            hull.push(min);
+            hull.push(max);
+
+            quickhull(hull, points, min, max);
+            quickhull(hull, points, max, min);
+
+            // Then sort the hull points by angle from the centroid
+            for (const point of hull) {
+                hullCentroid.x += point.x;
+                hullCentroid.y += point.y;
+            }
+            hullCentroid.x /= hull.length;
+            hullCentroid.y /= hull.length;
+
+            hull.forEach(p => p.angle = Math.atan2(p.y - hullCentroid.y, p.x - hullCentroid.x));
+            hull.sort((a, b) => a.angle - b.angle);
+
+            return hull;
+        }
+
+
+        /*
+             Separating Axis Theorem.
+        */
+
+        const overlap = (d1, d2) => d2.min < d1.max && d2.max > d1.min;
+        const dot = (v1, v2) => v1.x * v2.x + v1.y * v2.y;
+        const sub = (v1, v2) => ({ x: v1.x - v2.x, y: v1.y - v2.y });
+
+        /*
+            example for a triangle:
+            p1 -> p2 -> p3
+            e12: p2 - p1, e23: p3 - p2, e31: p3 - p1
+        */
+        function getAxis(hull) {
+            const axes = [];
+            let n = hull.length;
+            for (let i = 1; i < n; i++) {
+                const edge = sub(hull[i], hull[i - 1]);
+                axes.push({ x: -edge.y, y: edge.x });
+            }
+            const edge = sub(hull[n - 1], hull[0]);
+            axes.push({ x: -edge.y, y: edge.x });
+            return axes;
+        }
+
+        // return {min, max}
+        function getProjectionHullOnAxe(hull, axe) {
+            let min = Infinity, max = -Infinity;
+            for (const vertex of hull) {
+                const d = dot(vertex, axe);
+                if (d < min) {
+                    min = d;
+                }
+                if (d > max) {
+                    max = d;
+                }
+            }
+
+            return { min: min, max: max };
+        }
+
+        function testHullAxes(hull1, hull2, axes) {
+            for (const axe of axes) {
+                const projection1 = getProjectionHullOnAxe(hull1, axe);
+                const projection2 = getProjectionHullOnAxe(hull2, axe);
+                if (!overlap(projection1, projection2)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        function testSAT(hull1, hull2) {
+
+            const axes1 = getAxis(hull1);
+            const axes2 = getAxis(hull2);
+
+            if (!testHullAxes(hull1, hull2, axes1)) {
+                return false;
+            }
+            if (!testHullAxes(hull1, hull2, axes2)) {
+                return false;
+            }
+
+            return true;
+        }
+
+
+        /*
+            Rendering.
+        */
+
+        function fillCircle(px, py, r) {
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawHull(hull) {
+            ctx.beginPath();
+
+            ctx.moveTo(hull[0].x, hull[0].y);
+            for (let i = 1; i < hull.length; i++) {
+                ctx.lineTo(hull[i].x, hull[i].y);
+            }
+            ctx.lineTo(hull[0].x, hull[0].y);
+
+            ctx.stroke();
+        }
+
+        function drawAABB(aabb) {
+            ctx.strokeRect(aabb[0].x, aabb[0].y, aabb[1].x - aabb[0].x, aabb[1].y - aabb[0].y);
+        }
+
+        function AABBToHull(aabb) {
+            return [
+                { x: aabb[0].x, y: aabb[0].y },
+                { x: aabb[1].x, y: aabb[0].y },
+                { x: aabb[1].x, y: aabb[1].y },
+                { x: aabb[0].x, y: aabb[1].y }
+            ];
+        }
+
+        function drawPoints(points) {
+            points.forEach(p => fillCircle(p.x, p.y, 2));
+        }
+
+        function updateCanvas() {
+            ctx.clearRect(0, 0, width, height);
+
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+
+            pictures.forEach(v => {
+                if (testSAT(AABBToHull(v), randomHull)) {
+                    ctx.strokeStyle = "red";
+                } else {
+                    ctx.strokeStyle = "orange";
+                }
+                drawAABB(v)
+            });
+
+            // draw current AABB
+            if (pointerdownPosition) {
+                ctx.strokeStyle = "orange";
+                drawAABB([pointerdownPosition, pointerPosition]);
+            }
+
+            ctx.strokeStyle = "tomato";
+            drawHull(randomHull);
+            ctx.fillStyle = "tomato";
+            fillCircle(hullCentroid.x, hullCentroid.y, 3)
+
+            ctx.fillStyle = "grey";
+            drawPoints(randomPoints);
+        }
+
+        canvas.addEventListener("pointerdown", (e) => {
+            pointerdownPosition = { ...pointerPosition };
+        });
+
+        canvas.addEventListener("pointerup", (e) => {
+            if (!equalPoints(pointerdownPosition, pointerPosition)) {
+                pictures.push([{ ...pointerdownPosition }, { ...pointerPosition }]);
+            }
+
+            pointerdownPosition = null;
+            updateCanvas();
+        });
+
+        canvas.addEventListener("pointermove", (e) => {
+            let r = canvas.getBoundingClientRect();
+            pointerPosition = { x: e.clientX - r.left, y: e.clientY - r.top };
+
+            if (pointerdownPosition) {
+                updateCanvas();
+            }
+        });
+
+        $("#undo").addEventListener("click", e => {
+            let lastItem = pictures.pop();
+            if (lastItem !== undefined) {
+                undo.push(lastItem);
+            }
+
+            updateCanvas();
+        });
+
+        $("#redo").addEventListener("click", e => {
+            let lastUndo = undo.pop();
+            if (lastUndo !== undefined) {
+                pictures.push(lastUndo);
+            }
+
+            updateCanvas();
+        });
+
+        randomPoints = generateRandomPoints(numRandomPoints, randomBorderSize);
+        randomHull = computeHull(randomPoints);
+        updateCanvas();
+
+    </script>
+</body>
+
+</html>
