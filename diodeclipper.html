@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Diode Clipper
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="output">
+        <p></p>
+    </div>
+    <script>
+
+        /*
+            Simulation of an analog diode clipper circuit using Nodal Analysis (KCL).
+            This is a direct implementation from this talk: https://www.youtube.com/watch?v=eGcqomH6aAc
+            
+            https://en.wikipedia.org/wiki/Nodal_analysis
+            https://en.wikipedia.org/wiki/Clipper_(electronics)
+
+        */
+
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 256, height = 256;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+        const clamp = (x, min = 0, max = 1) => Math.min(max, Math.max(min, x));
+        const invlerp = (x, min, max) => clamp((x - min) / (max - min));
+        const lerp = (x, min, max) => min + x * (max - min);
+        const remap = (x, fmin, fmax, tmin, tmax) => lerp(invlerp(x, fmin, fmax), tmin, tmax);
+
+        const zero = (n) => Array(n).fill(0);
+        const sequence = (n) => [...Array(n)].map((_, i) => i);
+        const range = (min, max, step) => [...Array(Math.floor((max - min) / step))].map((_, i) => min + i * step);
+        const linspace = (min, max, n) => [...Array(n)].map((_, i) => min + i * (max - min) / (n - 1));
+        const apply = (fn, a) => a.map(t => fn(t));
+
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        function drawPlot(x, y, color = "black", range = null) {
+            ctx.strokeStyle = color;
+
+            ctx.beginPath();
+
+            let xmin, xmax, ymin, ymax;
+            if (range == null) {
+                xmin = ymin = Infinity;
+                xmax = ymax = -Infinity;
+
+                for (let v of x) {
+                    xmin = Math.min(v, xmin);
+                    xmax = Math.max(v, xmax);
+                }
+
+                for (let v of y) {
+                    ymin = Math.min(v, ymin);
+                    ymax = Math.max(v, ymax);
+                }
+            } else {
+                xmin = range.x[0];
+                xmax = range.x[1];
+                ymin = range.y[0];
+                ymax = range.y[1];
+            }
+
+            const border = 20;
+            const normalizeX = v => remap(v, xmin, xmax, border, width - border);
+            const normalizeY = v => height - remap(v, ymin, ymax, border, height - border);
+
+            let firstPointDrawn = false;
+            let i = 0;
+            const sampleSize = x.length;
+            while (!firstPointDrawn && i < sampleSize) {
+                if (x[i] >= xmin && x[i] <= xmax && y[i] >= ymin && y[i] <= ymax) {
+                    ctx.moveTo(
+                        normalizeX(x[i]),
+                        normalizeY(y[i])
+                    );
+                    firstPointDrawn = true;
+                }
+                i++;
+            }
+
+            if (!firstPointDrawn) {
+                return;
+            }
+
+            for (; i < sampleSize; i++) {
+                if (x[i] >= xmin && x[i] <= xmax && y[i] >= ymin && y[i] <= ymax) {
+                    let plotX = normalizeX(x[i]);
+                    let plotY = normalizeY(y[i]);
+                    ctx.lineTo(plotX, plotY);
+                }
+            }
+
+            ctx.stroke();
+        }
+
+        function drawFunction(fn, range, samples, color) {
+            let graph = { x: [], y: [] };
+            graph.x = linspace(range.x[0], range.x[1], samples);
+            graph.y = apply(fn, graph.x);
+            drawPlot(graph.x, graph.y, color, range);
+        };
+
+        /*
+            Analog circuit modelling (diode clipper).
+
+            Direct implementation from: 
+            "From circuit to code: Under the Hood of Analog Modelling."
+            https://www.youtube.com/watch?v=eGcqomH6aAc
+            https://cytomic.com/files/dsp/adc-2020-andrew-simper-circuit-to-code-slides.pdf
+
+            More refs:
+            http://www.ecircuitcenter.com/SpiceTopics/Non-Linear%20Analysis/Non-Linear%20Analysis.htm
+
+            Diode (shockley equation):
+            I = Is * (exp(vd/vt) - 1)
+
+            I,vd => current & voltage on the diode
+            Is, vt => constants (depends on temperature & diode type)
+
+            Linearization:
+            -- i' = dv * is/vt * exp(vd/vt)
+            gd = di/dv = is/vt * exp(vd/vt)
+            -- y = mx + b
+            id = gd*vd + ideq
+            ideq = id - gd*vd
+
+            Diode clipper circuit
+            -- gr = 1/r
+            ir - id1 + id2
+            gr*(v2-v1) - (-gd1*v2+id1eq) + (gd1*v2+id1eq)
+            v2 = (id1eq - id2eq + gr*v1) / (gd1 + gd2 + gr)
+
+        */
+        function diodeclipper(vin) {
+            const is1 = is2 = 1e-15;
+            const vt1 = vt2 = 26e-3;
+            const gr = 1.0 / 2.2e3;
+
+            let vout = 0;
+            const v1 = vin;
+
+            const iteration = 50;
+            for (let i = 0; i < iteration; i++) {
+
+                const lindiode = (vd, is, vt) => {
+                    const e = Math.exp(vd / vt);
+                    const gd = is * e / vt;
+                    const id = is * e - is;
+                    const ideq = id - gd * vd;
+                    return [ideq, gd];
+                };
+
+                let [id1eq, gd1] = lindiode(-vout, is1, vt1);
+                let [id2eq, gd2] = lindiode(vout, is2, vt2);
+
+                let v2 = (id1eq - id2eq + gr * v1) / (gd1 + gd2 + gr);
+                vout = v2;
+            }
+
+            return vout;
+        }
+
+        // Simple dsp model
+        const diodemodel = (vin) => clamp(vin, -.7, .7);
+
+        const saw = (x) => {
+            let fract = (x / (2 * Math.PI)) % 1;
+            if (x < 0) {
+                fract = 1 + fract;
+            }
+            return fract * 2 - 1;
+        };
+
+        output("(orange) Original signal - (red) KCL Node model with Newton-Raphson - (yellow) Clamp 0.7V model")
+
+        drawCanvas();
+        ctx.lineWidth = 1;
+        const freq = 1;
+        const xyrange = { x: [- 2.0 * Math.PI * freq, 2.0 * Math.PI * freq], y: [-1, 1] };
+        let sampleNumber = 80;
+        let graph = { x: [], y: [] };
+        let x = linspace(xyrange.x[0], xyrange.x[1], sampleNumber);
+        //let y = apply(Math.sin, x);
+        let y = apply(saw, x);
+        drawPlot(x, y, "tomato", xyrange);
+        drawPlot(x, apply(diodemodel, y), "orange", xyrange);
+        drawPlot(x, apply(diodeclipper, y), "red", xyrange);
+
+    </script>
+</body>
+
+</html>
