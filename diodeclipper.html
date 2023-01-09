@@ -165,37 +165,42 @@
             v2 = (id1eq - id2eq + gr*v1) / (gd1 + gd2 + gr)
 
         */
+        const lindiode = (vd, is, vt) => {
+            const expvdvt = Math.exp(vd / vt);
+            const gd = is * expvdvt / vt;
+            const id = is * expvdvt - is;
+            const ideq = id - gd * vd;
+            return [ideq, gd];
+        };
+        var avgIterations = 0;
         function diodeclipper(vin) {
-            const is1 = is2 = 1e-15;
-            const vt1 = vt2 = 26e-3;
             const gr = 1.0 / 2.2e3;
+            const is1 = 1e-15;
+            const vt1 = 26e-3;
+            const is2 = is1;
+            const vt2 = vt1;
 
-            let vout = 0;
+            // first estimate with the simplified model to speed-up things (closer to the real value)
+            let vout = diodeclippermodel(vin);
             const v1 = vin;
 
-            const iteration = 50;
-            for (let i = 0; i < iteration; i++) {
-
-                const lindiode = (vd, is, vt) => {
-                    const e = Math.exp(vd / vt);
-                    const gd = is * e / vt;
-                    const id = is * e - is;
-                    const ideq = id - gd * vd;
-                    return [ideq, gd];
-                };
-
+            const eps = 0.01;
+            let diff = eps + 1;
+            while (diff > eps) {
                 let [id1eq, gd1] = lindiode(-vout, is1, vt1);
                 let [id2eq, gd2] = lindiode(vout, is2, vt2);
-
                 let v2 = (id1eq - id2eq + gr * v1) / (gd1 + gd2 + gr);
+
+                diff = Math.abs(vout - v2);
                 vout = v2;
+                avgIterations++;
             }
 
             return vout;
         }
 
         // Simple dsp model
-        const diodemodel = (vin) => clamp(vin, -.7, .7);
+        const diodeclippermodel = (vin) => clamp(vin, -.7, .7);
 
         const saw = (x) => {
             let fract = (x / (2 * Math.PI)) % 1;
@@ -217,8 +222,10 @@
         //let y = apply(Math.sin, x);
         let y = apply(saw, x);
         drawPlot(x, y, "tomato", xyrange);
-        drawPlot(x, apply(diodemodel, y), "orange", xyrange);
+        drawPlot(x, apply(diodeclippermodel, y), "orange", xyrange);
         drawPlot(x, apply(diodeclipper, y), "red", xyrange);
+
+        output("Average convergence iterations: " + avgIterations / sampleNumber);
 
     </script>
 </body>
