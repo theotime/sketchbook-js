@@ -21,9 +21,14 @@
     <script>
 
         /*
-            Simulation of an analog diode clipper circuit using Nodal Analysis (KCL).
-            This is a direct implementation from this talk: https://www.youtube.com/watch?v=eGcqomH6aAc
+            Simulation of an analog diode clipper circuit using Nodal Analysis and KCL.
             
+            Direct implementation from: 
+            "From circuit to code: Under the Hood of Analog Modelling."
+            https://www.youtube.com/watch?v=eGcqomH6aAc
+            https://cytomic.com/files/dsp/adc-2020-andrew-simper-circuit-to-code-slides.pdf
+            
+            More refs:
             https://en.wikipedia.org/wiki/Nodal_analysis
             https://en.wikipedia.org/wiki/Clipper_(electronics)
 
@@ -133,15 +138,22 @@
             ctx.stroke();
         }
 
+        
+        /*
+            Modelling.
+        */
+
+        var ic1eq, ic2eq;
+        var avgIterations;
+        function initSystem() {
+            ic1eq = ic2eq = 0;
+            avgIterations = 0;
+        }
+
         /*
             Analog circuit modelling (diode clipper).
 
-            Direct implementation from: 
-            "From circuit to code: Under the Hood of Analog Modelling."
-            https://www.youtube.com/watch?v=eGcqomH6aAc
-            https://cytomic.com/files/dsp/adc-2020-andrew-simper-circuit-to-code-slides.pdf
-
-            More refs:
+            Additional refs:
             http://www.ecircuitcenter.com/SpiceTopics/Non-Linear%20Analysis/Non-Linear%20Analysis.htm
 
             Diode (shockley equation):
@@ -171,7 +183,6 @@
             const ideq = id - gd * vd;
             return [ideq, gd];
         };
-        var avgIterations = 0;
         function diodeclipper(vin) {
             const gr = 1.0 / 2.2e3;
             const is1 = 1e-15;
@@ -186,8 +197,8 @@
             const eps = 0.01;
             let diff = eps + 1;
             while (diff > eps) {
-                let [id1eq, gd1] = lindiode(-vout, is1, vt1);
-                let [id2eq, gd2] = lindiode(vout, is2, vt2);
+                const [id1eq, gd1] = lindiode(-vout, is1, vt1);
+                const [id2eq, gd2] = lindiode(vout, is2, vt2);
                 let v2 = (id1eq - id2eq + gr * v1) / (gd1 + gd2 + gr);
 
                 diff = Math.abs(vout - v2);
@@ -206,12 +217,7 @@
         /*
             Analog circuit modelling (LPF/HPF part).
 
-            Direct implementation from:
-            "From circuit to code: Under the Hood of Analog Modelling."
-            https://www.youtube.com/watch?v=eGcqomH6aAc
-            https://cytomic.com/files/dsp/adc-2020-andrew-simper-circuit-to-code-slides.pdf
-
-            More refs:
+            Additional refs:
             http://www.ecircuitcenter.com/SpiceTopics/Transient%20Analysis/Transient%20Analysis.htm
 
             Capacitor definition: i = c*v' <=> (f) v' = 1/c * i
@@ -243,26 +249,79 @@
             v2 = (gr1*v1 + gc1*v3 - ic1eq) / (gc1 + gr1)
 
         */
-        var ic1eq = ic2eq = 0;
-        const sampleRate = 44100;
         function lpfhpf(vin) {
 
             const gr1 = 1 / 2.2e3;
             const gr2 = 1 / 6.8e3;
-            const m = 1 / 2;
+            const m = 0.5; // Trapezoidal-rule
             const invm = 1 / m;
             const gc1 = 0.47e-6 * invm * sampleRate;
             const gc2 = 0.01e-6 * invm * sampleRate;
 
             const v1 = vin;
-            const v3 = (gc1 * ic2eq + gr1 * (ic1eq + ic2eq + gc1 * v1)) / (gr1 * (gc2 + gr2) + gc1 * (gc2 + gr1 + gr2));
-            const v2 = (gr1 * v1 + gc1 * v3 - ic1eq) / (gc1 + gr1);
+            const v3 = (gc1 * ic2eq + gr1 * (ic1eq + ic2eq + gc1 * vin)) / (gr1 * (gc2 + gr2) + gc1 * (gc2 + gr1 + gr2));
+            const v2 = (gr1 * vin + gc1 * v3 - ic1eq) / (gc1 + gr1);
             ic1eq += invm * (gc1 * (v3 - v2) - ic1eq);
             ic2eq += invm * (gc2 * v3 - ic2eq);
             const vout = v3;
 
             return vout;
         }
+
+        /*
+            Implementation of the full circuit.
+
+            Solving v3 node, by combining the two previous circuits:
+            (1) lpfhpf
+            (2) diodeclipper
+            
+            v3 node (y = v3, x = vin):
+            (1) c1*y - ((c1*r1*x+c1*c1*y-c1*q1)/(r1+c1)) - q1 - q2 + c2*y + r2*y
+            (2) + d1*y - t1 + d2*y + t2
+
+            Solved with an equation solver (t1 = id1eq, t2 = id2eq, q1 = ic1eq, q2 = ic2eq):
+            y = (-(c1*q1)/(c1 + r1) + (c1*r1*x)/(c1 + r1) + q1 + q2 + t1 - t2)/(-c1^2/(c1 + r1) + c1 + c2 + d1 + d2 + r2)
+
+        */
+        function clippersystem(vin) {
+            const gr1 = 1 / 2.2e3;
+            const gr2 = 1 / 6.8e3;
+            const m = 1; // backward euler
+            const invm = 1 / m;
+            const gc1 = 0.47e-6 * invm * sampleRate;
+            const gc2 = 0.01e-6 * invm * sampleRate;
+            const is1 = 1e-15;
+            const vt1 = 26e-3;
+            const is2 = is1;
+            const vt2 = vt1;
+
+            let vout = 0;
+            const v1 = vin;
+            let v2 = 0;
+            let v3 = 0;
+
+            const eps = 0.001;
+            let diff = eps + 1;
+            while (diff > eps) {
+                const [id1eq, gd1] = lindiode(-v3, is1, vt1);
+                const [id2eq, gd2] = lindiode(v3, is2, vt2);
+
+                const v3num = -(gc1 * ic1eq) / (gc1 + gr1) + (gc1 * gr1 * vin) / (gc1 + gr1) + ic1eq + ic2eq + id1eq - id2eq;
+                const v3den = -gc1 * gc1 / (gc1 + gr1) + gc1 + gc2 + gd1 + gd2 + gr2;
+                v3 = v3num / v3den;
+                v2 = (gr1 * vin + gc1 * v3 - ic1eq) / (gc1 + gr1);
+
+                diff = Math.abs(vout - v3);
+                vout = v3;
+                avgIterations++;
+            }
+
+            ic1eq += invm * (gc1 * (v3 - v2) - ic1eq);
+            ic2eq += invm * (gc2 * v3 - ic2eq);
+
+            return vout;
+        }
+
 
         function resample(yin) {
             let y = [];
@@ -277,11 +336,13 @@
         drawCanvas();
         ctx.lineWidth = 1;
 
+        const sampleRate = 44100;
+
         const xmax = 2.0 * Math.PI;
         const xmin = -xmax;
         const sampleSize = Math.floor((xmax - xmin) * sampleRate);
 
-        const frequency = 440;
+        const frequency = 1000;
         const gain = 2;
         const saw = (t) => {
             t = t * frequency;
@@ -304,12 +365,20 @@
         x = linspace(displayRange.x[0], displayRange.x[1], resampleSize);
 
         drawPlot(x, resample(y), "tomato", displayRange);
-        drawPlot(x, resample(apply(diodeclipper, y)), "red", displayRange);
-        drawPlot(x, resample(apply(lpfhpf, y)), "blue", displayRange);
+
+        //initSystem();
+        //drawPlot(x, resample(apply(diodeclipper, y)), "red", displayRange);
+        //drawPlot(x, resample(apply(lpfhpf, y)), "green", displayRange);
+
+        //drawPlot(x, resample(apply(diodeclippermodel, y)), "red", displayRange);
+        initSystem();
+        drawPlot(x, resample(apply(clippersystem, y)), "blue", displayRange);
+        
 
         output("-- Input signal (orange)");
-        output("-- Diode clipper model with Newton-Raphson (red)");
-        output("-- LPF/HPF model with Trapezoidal Rule (blue)");
+        output("-- Diode Clipper with pre-filtering LPF/HPF modelling using Newton-Raphson & Backward Euler (blue)");
+        //output("-- Diode clipper model with Newton-Raphson (red)");
+        //output("-- LPF/HPF model with Trapezoidal Rule (green)");
         output();
         output("Average convergence iterations: " + avgIterations / sampleSize);
 
