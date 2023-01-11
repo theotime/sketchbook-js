@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>
-        Diode Clipper Modelling
+        Sallen-Key LPF Modelling
     </title>
     <style>
         body {
@@ -14,6 +14,40 @@
 </head>
 
 <body>
+    <select name="osc" id="osc">
+        <option value="sin">sin</option>
+        <option value="saw">saw</option>
+        <option value="square" selected>square</option>
+        <option value="tri">triangle</option>
+    </select>
+    <br><br>
+    <div>
+        <label>Osc frequency: <span id="frequency-value">440</span><br>
+            <input id="frequency" name="frequency" type="range" min="20" max="1250" step="1" value="440">
+        </label>
+    </div>
+    <div>
+        <label>Cutoff: <span id="cutoff-value">220</span><br>
+            <input id="cutoff" name="cutoff" type="range" min="20" max="5000" step="1" value="1500">
+        </label>
+    </div>
+    <div>
+        <label>Resonance: <span id="resonance-value">0.5</span><br>
+            <input id="resonance" name="resonance" type="range" min="0" max="1" step="0.01" value="0.5">
+        </label>
+    </div>
+    <div>
+        <label>Cycles: <span id="cycles-value">3</span><br>
+            <input id="cycles" name="cycles" type="range" min="1" max="15" step="1" value="3">
+        </label>
+    </div>
+    <div>
+        <label>Factor m (0 = Backward Euler, 1/2 = Trapezoidal, 1 = Backward Euler): <span
+                id="mfactor-value">0.5</span><br>
+            <input id="mfactor" name="mfactor" type="range" min="0" max="1" step=".1" value="0.5">
+        </label>
+    </div>
+    <br>
     <canvas id="canvas"></canvas>
     <div id="output">
         <p></p>
@@ -21,7 +55,7 @@
     <script>
 
         /*
-            Simulation of an analog diode clipper circuit using Nodal Analysis and KCL.
+            Simulation of an analog Sallen-Key LPF circuit using Nodal Analysis and KCL.
             
             Direct implementation from: 
             "From circuit to code: Under the Hood of Analog Modelling."
@@ -30,7 +64,11 @@
             
             More refs:
             https://en.wikipedia.org/wiki/Nodal_analysis
-            https://en.wikipedia.org/wiki/Clipper_(electronics)
+            https://en.wikipedia.org/wiki/Sallen%E2%80%93Key_topology
+
+            Good learning reference for analog VCF:
+            "DIY VCF series." by Moritz Klein 
+            https://www.youtube.com/playlist?list=PLHeL0JWdJLvT1PAqW4TtvxtRoXyk741WM
 
         */
 
@@ -44,6 +82,22 @@
             $("#output p").innerHTML = txt;
         }
 
+        // UI
+        const oscElement = $("#osc");
+        const frequencyElement = $("#frequency");
+        const cutoffElement = $("#cutoff");
+        const resonanceElement = $("#resonance");
+        const cyclesElement = $("#cycles");
+        const mfactorElement = $("#mfactor");
+
+        oscElement.addEventListener("change", e => draw());
+        frequencyElement.addEventListener("change", e => draw());
+        cutoffElement.addEventListener("change", e => draw());
+        resonanceElement.addEventListener("change", e => draw());
+        cyclesElement.addEventListener("change", e => draw());
+        mfactorElement.addEventListener("change", e => draw());
+
+        // Canvas
         var canvas = $("#canvas");
         var ctx = canvas.getContext("2d");
 
@@ -138,84 +192,19 @@
             ctx.stroke();
         }
 
-        
+
         /*
             Modelling.
         */
 
         var ic1eq, ic2eq;
-        var avgIterations;
         function initSystem() {
             ic1eq = ic2eq = 0;
-            avgIterations = 0;
         }
-
-        /*
-            Analog circuit modelling (diode clipper).
-
-            Additional refs:
-            http://www.ecircuitcenter.com/SpiceTopics/Non-Linear%20Analysis/Non-Linear%20Analysis.htm
-
-            Diode (shockley equation):
-            I = Is * (exp(vd/vt) - 1)
-
-            I,vd => current & voltage on the diode
-            Is, vt => constants (depends on temperature & diode type)
-
-            Linearization:
-            -- i' = dv * is/vt * exp(vd/vt)
-            gd = di/dv = is/vt * exp(vd/vt)
-            -- y = mx + b
-            id = gd*vd + ideq
-            ideq = id - gd*vd
-
-            Diode clipper circuit
-            -- gr = 1/r
-            ir - id1 + id2
-            gr*(v2-v1) - (-gd1*v2+id1eq) + (gd1*v2+id1eq)
-            v2 = (id1eq - id2eq + gr*v1) / (gd1 + gd2 + gr)
-
-        */
-        const lindiode = (vd, is, vt) => {
-            const expvdvt = Math.exp(vd / vt);
-            const gd = is * expvdvt / vt;
-            const id = is * expvdvt - is;
-            const ideq = id - gd * vd;
-            return [ideq, gd];
-        };
-        function diodeclipper(vin) {
-            const gr = 1.0 / 2.2e3;
-            const is1 = 1e-15;
-            const vt1 = 26e-3;
-            const is2 = is1;
-            const vt2 = vt1;
-
-            // first estimate with the simplified model to speed-up things (closer to the real value)
-            let vout = diodeclippermodel(vin);
-            const v1 = vin;
-
-            const eps = 0.01;
-            let diff = eps + 1;
-            while (diff > eps) {
-                const [id1eq, gd1] = lindiode(-vout, is1, vt1);
-                const [id2eq, gd2] = lindiode(vout, is2, vt2);
-                let v2 = (id1eq - id2eq + gr * v1) / (gd1 + gd2 + gr);
-
-                diff = Math.abs(vout - v2);
-                vout = v2;
-                avgIterations++;
-            }
-
-            return vout;
-        }
-
-        // Simple dsp model for estimation
-        const breakdownVoltage = 0.670; // mV
-        const diodeclippermodel = (vin) => clamp(vin, -breakdownVoltage, breakdownVoltage);
 
 
         /*
-            Analog circuit modelling (LPF/HPF part).
+            Analog circuit modelling: Sallen-Key LPF with voltage control resistor.
 
             Additional refs:
             http://www.ecircuitcenter.com/SpiceTopics/Transient%20Analysis/Transient%20Analysis.htm
@@ -238,90 +227,37 @@
             iceq(t+1) = iceq(t) + 1/m * (gc*vc(t) - iceq(t))
 
             v2 node:
-            ir1 + ieq1 = ic1
-            ir1 -(ic1 - ieq1)
+            ig1 + ic1eq = ic1
+            -g(v1-v2) + gc1(v2-k*v3) - ic1eq
 
             v3 node:
-            ic1 + ic2 + ir2 = ieq1 + ieq2
-            ic1 + ic2 + ir2 - ieq1 - ieq2
+            ig2 + ic2eq = ic2
+            -g(v2-v3) + gc2*v3 - ic2eq
 
-            v3 = (gc1*ic2eq + gr1*(ic1eq + ic2eq + gc1*v1)) / (gr1*(gc2+gr2)+gc1*(gc2 + gr1 + gr2))
-            v2 = (gr1*v1 + gc1*v3 - ic1eq) / (gc1 + gr1)
+            v3 = (g*v2+ic2eq) / (g+gc2)
+            v2 = ((gc2+g)*g*v1 + gc1*k*ic2eq + (gc2+g)*ic1eq) / (gc1*gc2 - gc1*g*k + gc1*g + gc2*g + g*g);
 
         */
-        function lpfhpf(vin) {
+        function sallenkeylpf(vin) {
 
-            const gr1 = 1 / 2.2e3;
-            const gr2 = 1 / 6.8e3;
-            const m = 0.5; // Trapezoidal-rule
+            const m = mFactor;
             const invm = 1 / m;
-            const gc1 = 0.47e-6 * invm * sampleRate;
-            const gc2 = 0.01e-6 * invm * sampleRate;
+            const gc1 = 220e-9 * invm * sampleRate;
+            const gc2 = gc1;
+            const g = gc1 * Math.tan(Math.PI * cutoff / sampleRate);
+            const k = resonance;
 
             const v1 = vin;
-            const v3 = (gc1 * ic2eq + gr1 * (ic1eq + ic2eq + gc1 * vin)) / (gr1 * (gc2 + gr2) + gc1 * (gc2 + gr1 + gr2));
-            const v2 = (gr1 * vin + gc1 * v3 - ic1eq) / (gc1 + gr1);
-            ic1eq += invm * (gc1 * (v3 - v2) - ic1eq);
+            const v2num = (gc2 + g) * g * v1 + gc1 * k * ic2eq + (gc2 + g) * ic1eq;
+            const v2den = gc1 * gc2 - gc1 * g * k + gc1 * g + gc2 * g + g * g;
+            const v2 = v2num / v2den;
+            const v3 = (g * v2 + ic2eq) / (g + gc2);
+            ic1eq += invm * (gc1 * (v2 - k * v3) - ic1eq);
             ic2eq += invm * (gc2 * v3 - ic2eq);
             const vout = v3;
 
             return vout;
         }
-
-        /*
-            Implementation of the full circuit.
-
-            Solving v3 node, by combining the two previous circuits:
-            (1) lpfhpf
-            (2) diodeclipper
-            
-            v3 node (y = v3, x = vin):
-            (1) c1*y - ((c1*r1*x+c1*c1*y-c1*q1)/(r1+c1)) - q1 - q2 + c2*y + r2*y
-            (2) + d1*y - t1 + d2*y + t2
-
-            Solved with an equation solver (t1 = id1eq, t2 = id2eq, q1 = ic1eq, q2 = ic2eq):
-            y = (-(c1*q1)/(c1 + r1) + (c1*r1*x)/(c1 + r1) + q1 + q2 + t1 - t2)/(-c1^2/(c1 + r1) + c1 + c2 + d1 + d2 + r2)
-
-        */
-        function clippersystem(vin) {
-            const gr1 = 1 / 2.2e3;
-            const gr2 = 1 / 6.8e3;
-            const m = 1; // backward euler
-            const invm = 1 / m;
-            const gc1 = 0.47e-6 * invm * sampleRate;
-            const gc2 = 0.01e-6 * invm * sampleRate;
-            const is1 = 1e-15;
-            const vt1 = 26e-3;
-            const is2 = is1;
-            const vt2 = vt1;
-
-            let vout = 0;
-            const v1 = vin;
-            let v2 = 0;
-            let v3 = 0;
-
-            const eps = 0.001;
-            let diff = eps + 1;
-            while (diff > eps) {
-                const [id1eq, gd1] = lindiode(-v3, is1, vt1);
-                const [id2eq, gd2] = lindiode(v3, is2, vt2);
-
-                const v3num = -(gc1 * ic1eq) / (gc1 + gr1) + (gc1 * gr1 * vin) / (gc1 + gr1) + ic1eq + ic2eq + id1eq - id2eq;
-                const v3den = -gc1 * gc1 / (gc1 + gr1) + gc1 + gc2 + gd1 + gd2 + gr2;
-                v3 = v3num / v3den;
-                v2 = (gr1 * vin + gc1 * v3 - ic1eq) / (gc1 + gr1);
-
-                diff = Math.abs(vout - v3);
-                vout = v3;
-                avgIterations++;
-            }
-
-            ic1eq += invm * (gc1 * (v3 - v2) - ic1eq);
-            ic2eq += invm * (gc2 * v3 - ic2eq);
-
-            return vout;
-        }
-
 
         function resample(yin) {
             let y = [];
@@ -333,7 +269,6 @@
         }
 
 
-        drawCanvas();
         ctx.lineWidth = 1;
 
         const sampleRate = 44100;
@@ -342,45 +277,101 @@
         const xmin = -xmax;
         const sampleSize = Math.floor((xmax - xmin) * sampleRate);
 
-        const frequency = 1000;
+        // osc
+        var osc;
+        var frequency;
         const gain = 2;
+
+        // filter
+        var cutoff;
+        var resonance;
+
+        // Graphing parameters
+        const displayRange = { x: [0, 1], y: [-3.5, 3.5] };
+        var nCycles;
+        var resampleSize;
+
+        // Numerical integration (ode)
+        var mFactor;
+
+
+        const sin = (t) => gain * Math.sin(t * frequency * 2 * Math.PI);
         const saw = (t) => {
-            t = t * frequency;
+            t = t * frequency + 0.5;
             let fract = t % 1;
             if (t < 0) {
                 fract = 1 + fract;
             }
             return gain * (fract * 2 - 1);
         };
-        const sin = (t) => gain * Math.sin(t * frequency * 2 * Math.PI);
+        const square = (t) => {
+            t = t * frequency + 0.5;
+            let fract = t < 0 ? 1 + (t % 1) : t % 1;
+            fract = fract < 0.5 ? 0 : 1;
+            return gain * (fract * 2 - 1);
+        };
+        const tri = (t) => {
+            t = t * frequency + 0.5;
+            let fract = t < 0 ? 1 + (t % 1) : t % 1;
+            fract = Math.abs(fract - 0.5);
+            return gain * (fract * 4 - 1);
+        };
 
-        let x = linspace(xmin, xmax, sampleSize);
-        let y = apply(saw, x);
-        //let y = apply(sin, x);
 
-        // Resample for plotting
-        const displayRange = { x: [0, 1], y: [-2, 2] };
-        const nCycles = 3;
-        const resampleSize = nCycles * Math.floor(sampleSize / (Math.PI * 4 * frequency));
-        x = linspace(displayRange.x[0], displayRange.x[1], resampleSize);
+        function draw() {
+            drawCanvas();
 
-        drawPlot(x, resample(y), "tomato", displayRange);
+            $("#frequency-value").innerHTML = frequencyElement.value;
+            $("#cutoff-value").innerHTML = cutoffElement.value;
+            $("#resonance-value").innerHTML = resonanceElement.value;
+            $("#cycles-value").innerHTML = cyclesElement.value;
+            $("#mfactor-value").innerHTML = mfactorElement.value;
 
-        //initSystem();
-        //drawPlot(x, resample(apply(diodeclipper, y)), "red", displayRange);
-        //drawPlot(x, resample(apply(lpfhpf, y)), "green", displayRange);
+            // osc
+            frequency = frequencyElement.value;
+            osc = oscElement.value;
 
-        //drawPlot(x, resample(apply(diodeclippermodel, y)), "red", displayRange);
-        initSystem();
-        drawPlot(x, resample(apply(clippersystem, y)), "blue", displayRange);
-        
+            // filter
+            cutoff = cutoffElement.value;
+            resonance = resonanceElement.value;
+
+            // graph
+            nCycles = cyclesElement.value;
+            resampleSize = nCycles * Math.floor(sampleSize / (Math.PI * 4 * frequency));
+
+            // integration
+            mFactor = mfactorElement.value
+
+
+            let x = linspace(xmin, xmax, sampleSize);
+            let y;
+            switch (osc) {
+                case "sin":
+                    y = apply(sin, x);
+                    break;
+                case "saw":
+                    y = apply(saw, x);
+                    break;
+                case "square":
+                    y = apply(square, x);
+                    break;
+                case "tri":
+                    y = apply(tri, x);
+                    break;
+            }
+
+            // Resample for plotting
+            let graphx = linspace(displayRange.x[0], displayRange.x[1], resampleSize);
+            drawPlot(graphx, resample(y), "tomato", displayRange);
+
+            initSystem();
+            drawPlot(graphx, resample(apply(sallenkeylpf, y)), "blue", displayRange);
+        }
+
+        draw();
 
         output("-- Input signal (orange)");
-        output("-- Diode Clipper with pre-filtering LPF/HPF modelling using Newton-Raphson & Backward Euler (blue)");
-        //output("-- Diode clipper model with Newton-Raphson (red)");
-        //output("-- LPF/HPF model with Trapezoidal Rule (green)");
-        output();
-        output("Average convergence iterations: " + avgIterations / sampleSize);
+        output("-- Sallen-Key topology LPF modelling (blue)");
 
     </script>
 </body>
