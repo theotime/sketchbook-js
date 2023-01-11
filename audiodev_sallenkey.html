@@ -23,17 +23,17 @@
     <br><br>
     <div>
         <label>Osc frequency: <span id="frequency-value">440</span><br>
-            <input id="frequency" name="frequency" type="range" min="20" max="1250" step="1" value="440">
+            <input id="frequency" name="frequency" type="range" min="20" max="2000" step="1" value="440">
         </label>
     </div>
     <div>
-        <label>Cutoff: <span id="cutoff-value">220</span><br>
+        <label>Cutoff: <span id="cutoff-value">1500</span><br>
             <input id="cutoff" name="cutoff" type="range" min="20" max="5000" step="1" value="1500">
         </label>
     </div>
     <div>
         <label>Resonance: <span id="resonance-value">0.5</span><br>
-            <input id="resonance" name="resonance" type="range" min="0" max="1" step="0.01" value="0.5">
+            <input id="resonance" name="resonance" type="range" min="0" max="2" step="0.01" value="0.5">
         </label>
     </div>
     <div>
@@ -42,7 +42,7 @@
         </label>
     </div>
     <div>
-        <label>Factor m (0 = Backward Euler, 1/2 = Trapezoidal, 1 = Backward Euler): <span
+        <label>Factor m (0 = Forward Euler, 1/2 = Trapezoidal, 1 = Backward Euler): <span
                 id="mfactor-value">0.5</span><br>
             <input id="mfactor" name="mfactor" type="range" min="0" max="1" step=".1" value="0.5">
         </label>
