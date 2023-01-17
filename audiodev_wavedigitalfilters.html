@@ -47,12 +47,11 @@
             Wave Digital Filters.
             Exploration of the technique.
 
-            "Analog Modeling With Digital Wave Filters In C++" by Jatin Chowdhury
+            Refs:
+            [1] "Analog Modeling With Digital Wave Filters In C++" by Jatin Chowdhury
             https://www.youtube.com/watch?v=Auwf9z0k_7E
-
-            More refs:
-            https://stacks.stanford.edu/file/druid:jy057cz8322/KurtJamesWernerDissertation-augmented.pdf
-            https://github.com/multivac61/wave_digital_notebook/blob/master/WDFs_in_circuit_emulation.ipynb
+            [2] https://stacks.stanford.edu/file/druid:jy057cz8322/KurtJamesWernerDissertation-augmented.pdf
+            [3] https://github.com/multivac61/wave_digital_notebook/blob/master/WDFs_in_circuit_emulation.ipynb
 
         */
 
@@ -182,10 +181,13 @@
             acstate = 0;
         }
 
-
         /*
             Simple RC passive filter modeling with WDF.
-            This is a simple hardcoded draft so we get the core concepts.
+            This is a simple hardcoded draft to get the core concepts.
+
+            Inspired by this resource:
+            https://github.com/multivac61/wave_digital_notebook/blob/master/WDFs_in_circuit_emulation.ipynb
+
 
             Vin --Rs--+--R--+--- Vout
                             |
@@ -220,9 +222,9 @@
             Rp = Rs, b = vs
 
             -- series n-adaptors
-            v1+v2=0
-            i1-i2=0
-            bi = ai - 2Ri*Atot/Rtot
+            v1 + v2 + ... + vn = 0
+            i1 - i2 - ... - in = 0
+            bi = ai - 2*Ri*Atot/Rtot
 
             1. For each leafs, propagate reflected wave to parent node (incident wave for this parent node)
             2. At root, compute reflected wave 
