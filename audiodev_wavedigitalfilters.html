@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>
+        Wave Digital Filters
+    </title>
+    <style>
+        body {
+            font-family: monospace;
+        }
+    </style>
+</head>
+
+<body>
+    <select name="osc" id="osc">
+        <option value="sin">sin</option>
+        <option value="saw">saw</option>
+        <option value="square" selected>square</option>
+        <option value="tri">triangle</option>
+    </select>
+    <br><br>
+    <div>
+        <label>Osc frequency: <span id="frequency-value">440</span><br>
+            <input id="frequency" name="frequency" type="range" min="20" max="2000" step="1" value="440">
+        </label>
+    </div>
+    <div>
+        <label>Cutoff: <span id="cutoff-value">1500</span><br>
+            <input id="cutoff" name="cutoff" type="range" min="20" max="5000" step="1" value="1500">
+        </label>
+    </div>
+    <div>
+        <label>Cycles: <span id="cycles-value">3</span><br>
+            <input id="cycles" name="cycles" type="range" min="1" max="15" step="1" value="3">
+        </label>
+    </div>
+    <br>
+    <canvas id="canvas"></canvas>
+    <div id="output">
+        <p></p>
+    </div>
+    <script>
+
+        /*
+            Wave Digital Filters.
+            Exploration of the technique.
+
+            "Analog Modeling With Digital Wave Filters In C++" by Jatin Chowdhury
+            https://www.youtube.com/watch?v=Auwf9z0k_7E
+
+            More refs:
+            https://stacks.stanford.edu/file/druid:jy057cz8322/KurtJamesWernerDissertation-augmented.pdf
+            https://github.com/multivac61/wave_digital_notebook/blob/master/WDFs_in_circuit_emulation.ipynb
+
+        */
+
+
+        const $ = (e) => document.querySelector(e);
+        const $$ = (e) => document.querySelectorAll(e);
+
+        function output(s = "") {
+            var txt = $("#output p").innerHTML;
+            txt += s + "<br>";
+            $("#output p").innerHTML = txt;
+        }
+
+        // UI
+        const oscElement = $("#osc");
+        const frequencyElement = $("#frequency");
+        const cutoffElement = $("#cutoff");
+        const cyclesElement = $("#cycles");
+
+        oscElement.addEventListener("change", e => draw());
+        frequencyElement.addEventListener("change", e => draw());
+        cutoffElement.addEventListener("change", e => draw());
+        cyclesElement.addEventListener("change", e => draw());
+
+        // Canvas
+        var canvas = $("#canvas");
+        var ctx = canvas.getContext("2d");
+
+        const width = 340, height = 250;
+        var pixelRatio = window.devicePixelRatio;
+        canvas.width = width * pixelRatio;
+        canvas.height = height * pixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        ctx.scale(pixelRatio, pixelRatio);
+
+        const clamp = (x, min = 0, max = 1) => Math.min(max, Math.max(min, x));
+        const invlerp = (x, min, max) => clamp((x - min) / (max - min));
+        const lerp = (x, min, max) => min + x * (max - min);
+        const remap = (x, fmin, fmax, tmin, tmax) => lerp(invlerp(x, fmin, fmax), tmin, tmax);
+
+        const zero = (n) => Array(n).fill(0);
+        const sequence = (n) => [...Array(n)].map((_, i) => i);
+        const range = (min, max, step) => [...Array(Math.floor((max - min) / step))].map((_, i) => min + i * step);
+        const linspace = (min, max, n) => [...Array(n)].map((_, i) => min + i * (max - min) / (n - 1));
+        const apply = (fn, a) => a.map(t => fn(t));
+
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = "bisque";
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.strokeStyle = "orange";
+            ctx.beginPath();
+            ctx.moveTo(0, height / 2);
+            ctx.lineTo(width, height / 2);
+            ctx.stroke();
+        }
+
+        function drawPlot(x, y, color = "black", range = null) {
+            ctx.strokeStyle = color;
+
+            ctx.beginPath();
+
+            let xmin, xmax, ymin, ymax;
+            if (range == null) {
+                xmin = ymin = Infinity;
+                xmax = ymax = -Infinity;
+
+                for (let v of x) {
+                    xmin = Math.min(v, xmin);
+                    xmax = Math.max(v, xmax);
+                }
+
+                for (let v of y) {
+                    ymin = Math.min(v, ymin);
+                    ymax = Math.max(v, ymax);
+                }
+            } else {
+                xmin = range.x[0];
+                xmax = range.x[1];
+                ymin = range.y[0];
+                ymax = range.y[1];
+            }
+
+            const border = 20;
+            const normalizeX = v => remap(v, xmin, xmax, border, width - border);
+            const normalizeY = v => height - remap(v, ymin, ymax, border, height - border);
+
+            let firstPointDrawn = false;
+            let i = 0;
+            const sampleSize = x.length;
+            while (!firstPointDrawn && i < sampleSize) {
+                if (x[i] >= xmin && x[i] <= xmax && y[i] >= ymin && y[i] <= ymax) {
+                    ctx.moveTo(
+                        normalizeX(x[i]),
+                        normalizeY(y[i])
+                    );
+                    firstPointDrawn = true;
+                }
+                i++;
+            }
+
+            if (!firstPointDrawn) {
+                return;
+            }
+
+            for (; i < sampleSize; i++) {
+                if (x[i] >= xmin && x[i] <= xmax && y[i] >= ymin && y[i] <= ymax) {
+                    let plotX = normalizeX(x[i]);
+                    let plotY = normalizeY(y[i]);
+                    ctx.lineTo(plotX, plotY);
+                }
+            }
+
+            ctx.stroke();
+        }
+
+
+        /*
+            Modelling.
+        */
+
+        var acstate; // Incident "a" wave for capacitor (state, a(n-1))
+        function initSystem() {
+            acstate = 0;
+        }
+
+
+        /*
+            Simple RC passive filter modeling with WDF.
+            This is a simple hardcoded draft so we get the core concepts.
+
+            Vin --Rs--+--R--+--- Vout
+                            |
+                            C
+                            |
+                           Gnd
+
+            
+            Root: Series Port Adapter (SP)
+            Childs: Vin (Vs), Resistor (R), Capacitor (C)
+            SP -> (Vs, R, C)
+
+            incident: a = v + i*Rp
+            reflected: b = v - i*Rp
+
+            v = a - i*Rp
+            i = (v - b)/Rp
+
+            v = 1/2 * (a + b)
+            i = 1/2*Rp * (a - b)
+
+            -- resistor
+            Zr = R = v/i
+            Rp = R, b = 0
+
+            -- capacitor
+            Zc = 1/sC = v/i
+            Rp = 1/2fsC, b = a(n-1)
+
+            -- resistive voltage source
+            v = vs + Rs*i
+            Rp = Rs, b = vs
+
+            -- series n-adaptors
+            v1+v2=0
+            i1-i2=0
+            bi = ai - 2Ri*Atot/Rtot
+
+            1. For each leafs, propagate reflected wave to parent node (incident wave for this parent node)
+            2. At root, compute reflected wave 
+            3. Propagate this reflected wave to the leaf nodes (incident wave for these nodes)
+            4. Get output voltage at desired component
+
+        */
+        function rcfilter(vin) {
+
+            // port resistances
+            const rr = 10;
+            const rs = 1;
+            const rc = (rr + rs) * cutoff / sampleRate;
+            const Rtot = rr + rc + rs;
+
+
+            // 1. At leafs: propagate reflected wave to parent node
+            const br = 0;
+            const bc = acstate;
+            const bs = -vin; // -vin + vr + vc = 0
+
+            // 2. At series adaptor (root), compute reflected wave from incident waves
+            const Atot = br + bc + bs;
+            const ai = bc;
+            const b2c = ai - 2 * rc * Atot / Rtot;
+
+            // 3. At, capacitor receive & store incident wave
+            acstate = b2c;
+
+            // 4. Evaluate Voltage at capacitor
+            const vout = (acstate + bc) / 2;
+
+            return vout;
+        }
+
+        function resample(yin) {
+            let y = [];
+            const startpos = Math.floor(sampleSize / 2 - resampleSize / 2);
+            for (let i = 0; i < resampleSize; i++) {
+                y[i] = yin[startpos + i];
+            }
+            return y;
+        }
+
+
+        ctx.lineWidth = 1;
+
+        const sampleRate = 44100;
+
+        const xmax = 2.0 * Math.PI;
+        const xmin = -xmax;
+        const sampleSize = Math.floor((xmax - xmin) * sampleRate);
+
+        // osc
+        var osc;
+        var frequency;
+        const gain = 2;
+
+        // filter
+        var cutoff;
+
+        // Graphing parameters
+        const displayRange = { x: [0, 1], y: [-3.5, 3.5] };
+        var nCycles;
+        var resampleSize;
+
+
+        const sin = (t) => gain * Math.sin(t * frequency * 2 * Math.PI);
+        const saw = (t) => {
+            t = t * frequency + 0.5;
+            let fract = t % 1;
+            if (t < 0) {
+                fract = 1 + fract;
+            }
+            return gain * (fract * 2 - 1);
+        };
+        const square = (t) => {
+            t = t * frequency + 0.5;
+            let fract = t < 0 ? 1 + (t % 1) : t % 1;
+            fract = fract < 0.5 ? 0 : 1;
+            return gain * (fract * 2 - 1);
+        };
+        const tri = (t) => {
+            t = t * frequency + 0.5;
+            let fract = t < 0 ? 1 + (t % 1) : t % 1;
+            fract = Math.abs(fract - 0.5);
+            return gain * (fract * 4 - 1);
+        };
+
+
+        function draw() {
+            drawCanvas();
+
+            $("#frequency-value").innerHTML = frequencyElement.value;
+            $("#cutoff-value").innerHTML = cutoffElement.value;
+            $("#cycles-value").innerHTML = cyclesElement.value;
+
+            // osc
+            frequency = frequencyElement.value;
+            osc = oscElement.value;
+
+            // filter
+            cutoff = cutoffElement.value;
+
+            // graph
+            nCycles = cyclesElement.value;
+            resampleSize = nCycles * Math.floor(sampleSize / (Math.PI * 4 * frequency));
+
+
+            let x = linspace(xmin, xmax, sampleSize);
+            let y;
+            switch (osc) {
+                case "sin":
+                    y = apply(sin, x);
+                    break;
+                case "saw":
+                    y = apply(saw, x);
+                    break;
+                case "square":
+                    y = apply(square, x);
+                    break;
+                case "tri":
+                    y = apply(tri, x);
+                    break;
+            }
+
+            //y = apply(v => gain*1, x); // dc
+
+            // Resample for plotting
+            let graphx = linspace(displayRange.x[0], displayRange.x[1], resampleSize);
+            drawPlot(graphx, resample(y), "tomato", displayRange);
+
+            initSystem();
+            drawPlot(graphx, resample(apply(rcfilter, y)), "blue", displayRange);
+        }
+
+        draw();
+
+        output("-- Input signal (orange)");
+        output("-- RC passive LPF with Wave Digital Filters modelling (blue)");
+
+    </script>
+</body>
+
+</html>
