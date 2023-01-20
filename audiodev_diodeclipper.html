@@ -210,8 +210,8 @@
         }
 
         // Simple dsp model for estimation
-        const breakdownVoltage = 0.670; // mV
-        const diodeclippermodel = (vin) => clamp(vin, -breakdownVoltage, breakdownVoltage);
+        const thresholdVoltage = 0.670; // mV
+        const diodeclippermodel = (vin) => clamp(vin, -thresholdVoltage, thresholdVoltage);
 
 
         /*
